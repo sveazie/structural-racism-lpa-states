@@ -1,0 +1,163 @@
+---
+title: "Employment data cleaning"
+author: "Stephanie Veazie"
+date: "2022-12-2"
+output:
+  word_document: default
+---
+
+## Download data
+
+1. Go to https://data.census.gov/cedsci/
+
+2. Select "advanced search." 
+
+3. On the filter on the left-hand side of the page, under "geographies" select "state" then select "all states with in the US, Puerto Rico, and the Island Areas." 
+
+4. Under "topics," select "employment" then "employment and labor force status."
+
+5. Click "search" 
+
+6. Select "S2301 Employment status"
+
+7. Under drop-down menu, select "2019: ACS 5-year estimates subject tables"
+
+8. Select "transpose."
+
+9. Download as a csv file. 
+
+10. Repeat steps 7-9 for "2014: ACS 5-year estimates subject tables"
+
+# Load libraries
+
+```{r}
+# Load libraries
+library(tidyverse)
+library(magrittr)
+```
+
+# Import files
+
+```{r}
+employ_2019 <- read_csv("../../data/raw/us-census/ACSST5Y2019.S2301-2024-08-15T201852.csv")
+```
+
+# Create function to clean 2019 csv file
+
+```{r}
+clean_employ_2019_census_file <- function(file_name){
+
+# Create dataset of columns that report variable name and data by race
+selected_employment_data <- file_name %>% 
+  select(`Label (Grouping)`, 
+         `Population 16 years and over`, 
+         starts_with("Population 16 years and over!!R") ) %>%
+  select(-`Population 16 years and over!!RACE AND HISPANIC OR LATINO ORIGIN`)
+
+names(selected_employment_data)
+# Simplify the column names
+names(selected_employment_data)<-c("variable", 
+                                   "total",
+                                   "white", 
+                                   "black", 
+                                   "AIAN", 
+                                   "asian", 
+                                   "NHPI", 
+                                   "other_race", 
+                                   "two_races", 
+                                   "hispanic", 
+                                   "white_non_hispanic")
+
+# Confirm change
+names(selected_employment_data)
+
+state_indices <- seq(1, 664, by = 13)
+
+selected_employment_data %<>% 
+  mutate(state_vector = case_when(row_number() %in% state_indices ~ variable,
+                           !(row_number() %in% state_indices) ~ NA_character_)
+  )
+
+selected_employment_data %<>% mutate(grouping_indicator = ifelse(is.na(state_vector), 0, 1),
+                                     group_sum = cumsum(grouping_indicator))
+
+states_dat <- selected_employment_data %>% group_by(group_sum) %>% summarise(state_vector = first(state_vector))
+selected_employment_data2 <- merge(states_dat, 
+                                   selected_employment_data, 
+                                   by = "group_sum",
+                                   all.y = T)
+
+selected_employment_data2 %<>%
+  select(-state_vector.y, -starts_with("group")) %>% rename(state_vector = state_vector.x)
+
+#select the total population estimate, labor force participation and the unemployment estimates only.
+
+selected_employment_data2 %<>% mutate(estimate_ind = ifelse(str_detect(variable, "Estimate"), 1, 0))
+
+selected_employment_data2 %<>% group_by(state_vector) %>% mutate(est_count = cumsum(estimate_ind))
+
+selected_employment_data3 <- selected_employment_data2 %>% filter(estimate_ind == 1 & est_count %in% c(1, 2, 4)) %>% 
+  # added 2 above to pull the labor participation rate
+  mutate(variable = 
+           case_when( # changed this from if_else to case_when since there are now 3 categories
+             estimate_ind == 1 & est_count == 1 ~ "total_pop",
+             estimate_ind == 1 & est_count == 2 ~ "labor_force", 
+             estimate_ind == 1 & est_count == 4 ~ "unemployment"))
+
+# Remove ',' and '%' from data in order to create numerical data
+selected_employment_data4 <- selected_employment_data3 %>% mutate_all(~ str_replace(., "%", ""))
+selected_employment_data4 <- selected_employment_data4 %>% mutate_all(~ str_replace_all(., ",", ""))
+
+selected_employment_data4 %<>% select(-estimate_ind, -est_count)
+
+# Pivot wider so each state's data is on 1 row.
+tidy_unemployment <- selected_employment_data4 %>% 
+  pivot_wider(names_from= variable, 
+              values_from = c("total", "white", "black", "AIAN", "asian", "NHPI", "other_race", "two_races", "hispanic", "white_non_hispanic"),
+              names_glue="{variable}_{.value}")
+
+# Subset data
+tidy_unemployment_black_white <- tidy_unemployment %>% select(state_vector, ends_with(c("white_non_hispanic", "black")))
+
+# Create RR
+tidy_unemployment_black_white %<>%  
+  mutate(total_pop_white_non_hispanic = as.numeric(total_pop_white_non_hispanic),
+         labor_force_white_non_hispanic = as.numeric(labor_force_white_non_hispanic)/100, 
+         unemployment_white_non_hispanic = as.numeric(unemployment_white_non_hispanic)/100,
+         total_pop_black = as.numeric(total_pop_black),
+         labor_force_black = as.numeric(labor_force_black)/100,
+         unemployment_black = as.numeric(unemployment_black)/100)
+
+# Add column with White:Black ratio and difference in unemployment
+tidy_unemployment_bw <- tidy_unemployment_black_white %>%
+  mutate( 
+    bw_unemploy_RR = unemployment_black / unemployment_white_non_hispanic)
+
+## Calculate CI for unemployment RR
+
+return(tidy_unemployment_bw)
+}
+```
+
+# Apply function to get cleaned datasets
+
+```{r}
+employ_2019_clean <- clean_employ_2019_census_file(employ_2019)
+```
+
+# Export
+
+```{r}
+# Add year
+comb_employ_2019_final <- employ_2019_clean %>% mutate(year = 2019)
+
+# Rearrange cols
+comb_employ_2019_final <- comb_employ_2019_final[,c(1,9,2:8)]
+
+comb_employ_2019_final <- comb_employ_2019_final %>% rename(
+  state = state_vector
+)
+
+# Export
+write_csv(comb_employ_2019_final, "../../data/cleaned/unemployment-clean.csv")
+```

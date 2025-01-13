@@ -1,0 +1,272 @@
+---
+title: "Incarceration data cleaning with new denominators"
+author: "Stephanie Veazie"
+date: "2023-05-05"
+output: html_document
+---
+
+# Import data from Bureau of Justice Statistics
+
+1. Go to https://csat.bjs.ojp.gov/advanced-query
+
+2. Under "Query type" select "offender characteristics." 
+
+3. Under "category" select "year-end population."
+
+4. Under "sex" select "all."
+
+5. Under "variable 1" select "race/hispanic ethnicity of inmate." 
+
+6. Under "jurisdiction" select "all."
+
+7. Under "year" select 2010-2019. 
+
+8. Hit "submit." 
+
+Warning from BJS website: Users are cautioned against making state-to-state comparisons with CSAT-Prisoners because states have very different offender profiles. Some states have unified prison and jail systems, while in other states only offenders with a sentence of more than one year serve sentences in prison. NCRP only includes offenders serving sentences in prisons.
+
+9. Select "ok. 
+
+10. Select "export to Excel." 
+
+11. Rename file "bjs-incarceration-by-race-state-2010-2019-aug-22-24-dl.xlsx
+
+# Import data from US Census Bureau website
+
+1. Go to the US Census Bureau's Population & Housing Unit Estimates website-
+https://www.census.gov/programs-surveys/popest/technical-documentation/research/evaluation-estimates/2020-evaluation-estimates/2010s-state-detail.html
+
+2. Download the Excel sheet titled "Annual State Resident Population Estimates for 6 Race Groups (5 Race Alone Groups and one multiple race group) by Age, Sex, and Hispanic Origin: April 1, 2010 to July 1, 2019; April 1, 2020; and July 1, 2020 (SC-EST2020-ALLDATA6) [<1.0 MB]" 
+
+3. Download the accompanying "File Layout" PDF 
+
+# Load Census Bureau data into R 
+
+```{r}
+# Load libraries
+library(tidyverse)
+library(dplyr)
+library(readxl)
+library(magrittr)
+
+# Import CSV
+residents<- read_csv("../../data/raw/us-census/SC-EST2020-ALLDATA6.csv")
+```
+
+```{r}
+# Select variables of interest
+selected_residents<- select(residents, c("STATE", "NAME", "SEX", "ORIGIN", "RACE", "AGE", 
+                                         "POPESTIMATE2010", 
+                                         "POPESTIMATE2011", 
+                                         "POPESTIMATE2012", 
+                                         "POPESTIMATE2013", 
+                                         "POPESTIMATE2014",
+                                         "POPESTIMATE2015", 
+                                         "POPESTIMATE2016",
+                                         "POPESTIMATE2017", 
+                                         "POPESTIMATE2018",
+                                         "POPESTIMATE2019"))
+
+
+# Filter to non-hispanic individuals
+selected_residents<- filter(selected_residents, ORIGIN == 1)
+```
+
+```{r}
+# Filter to all sexes
+selected_residents %<>% filter(SEX == 0)
+```
+
+```{r}
+# Filter to Black or White individuals
+selected_residents<- filter(selected_residents, RACE == 1 | RACE == 2) 
+```
+
+```{r}
+# Filter to those aged 15-64
+selected_residents <- selected_residents %>% filter(AGE %in% (15:64))
+```
+
+```{r}
+# Group by state & race
+by_state_race<- group_by(selected_residents, NAME, RACE)
+
+# Sum residential info by group
+resident_summary<- as_data_frame(
+  summarize(by_state_race, 
+            sum_2010 = sum(POPESTIMATE2010),
+            sum_2011 = sum(POPESTIMATE2011),
+            sum_2012 = sum(POPESTIMATE2012),
+            sum_2013 = sum(POPESTIMATE2013),
+            sum_2014 = sum(POPESTIMATE2014),
+            sum_2015 = sum(POPESTIMATE2015), 
+            sum_2016 = sum(POPESTIMATE2016), 
+            sum_2017 = sum(POPESTIMATE2017), 
+            sum_2018 = sum(POPESTIMATE2018), 
+            sum_2019 = sum(POPESTIMATE2019))
+)
+```
+
+```{r}
+# Label race data
+resident_summary <- resident_summary %>%
+  mutate(
+    race = case_when(
+      RACE == 1 ~ "white_nh", 
+      RACE == 2 ~ "black_nh")) %>% 
+  select(-RACE)
+
+# pivot longer
+resident_summary2 <- resident_summary %>% 
+  pivot_longer(! c(NAME, race), names_to = "year", values_to = "num_residents")
+
+resident_summary2 %<>% mutate(year = str_sub(year, -4, -1))
+
+resident_summary2 %<>% rename(state_vector = NAME)
+rm(resident_summary)
+
+```
+
+# Load BJS data into R
+
+```{r}
+incarceration<- read_xlsx("../../data/raw/csat-bjs/bjs-incarceration-by-race-state-2010-2019-aug-22-24-dl.xlsx", range = "A2:L253", na = c("*", "NA"))
+```
+
+```{r}
+# Rename columns
+colnames(incarceration)<- c("state", "race_ethnicity_of_inmate", 
+                            "year_2010", "year_2011", "year_2012", "year_2013", "year_2014",
+                            "year_2015", "year_2016", "year_2017", "year_2018", "year_2019")
+
+state_indices <- seq(1, 251, by = 5)
+
+#does not contain Puerto Rico and DC at end
+
+incarceration %<>% 
+  mutate(state_vector = case_when(row_number() %in% state_indices ~ state,
+                           !(row_number() %in% state_indices) ~ NA_character_)
+  )
+
+incarceration %<>% mutate(grouping_indicator = ifelse(is.na(state_vector), 0, 1),
+                                     group_sum = cumsum(grouping_indicator))
+
+states_dat <- incarceration %>% group_by(group_sum) %>% summarise(state_vector = first(state_vector))
+incarceration2 <- merge(states_dat, 
+                        incarceration, 
+                        by = "group_sum",
+                        all.y = T)
+
+incarceration2 %<>%
+  select(-state_vector.y, -state, -starts_with("group")) %>% rename(state_vector = state_vector.x)
+
+capwords <- function(s, strict = FALSE) {
+    cap <- function(s) paste(toupper(substring(s, 1, 1)),
+                  {s <- substring(s, 2); if(strict) tolower(s) else s},
+                             sep = "", collapse = " " )
+    sapply(strsplit(s, split = " "), cap, USE.NAMES = !is.null(names(s)))
+}
+
+incarceration2 %<>% mutate(state_vector = capwords(tolower(state_vector)))
+
+incarceration2 %<>% filter(race_ethnicity_of_inmate %in% c("Black, non-Hispanic", "White, non-Hispanic"))
+
+incarceration2 %<>% mutate(race_ethnicity_of_inmate = 
+                             case_when(race_ethnicity_of_inmate == "Black, non-Hispanic" ~ "black_nh", 
+                                       race_ethnicity_of_inmate == "White, non-Hispanic" ~ "white_nh"))
+
+incarceration2 %<>% rename(num_incarcerated_2010 = year_2010,
+                           num_incarcerated_2011 = year_2011,
+                           num_incarcerated_2012 = year_2012,
+                           num_incarcerated_2013 = year_2013,
+                           num_incarcerated_2014 = year_2014,
+  
+                           num_incarcerated_2015 = year_2015,
+                           num_incarcerated_2016 = year_2016,    
+                           num_incarcerated_2017 = year_2017,
+                           num_incarcerated_2018 = year_2018,
+                           num_incarcerated_2019 = year_2019)
+rm(incarceration)
+rm(states_dat)
+
+# pivot longer
+incarceration3 <- incarceration2 %>% pivot_longer(! c(state_vector, race_ethnicity_of_inmate), names_to = "year", values_to = "num_incarcerated")
+
+incarceration3 %<>% mutate(year = str_sub(year, -4, -1))
+
+incarceration3 %<>% rename(race = race_ethnicity_of_inmate)
+
+```
+
+# Combine BJS & US Census Bureau Datasets
+
+```{r}
+setdiff(incarceration3$state_vector, resident_summary2$state_vector)
+setdiff(resident_summary2$state_vector, incarceration3$state_vector) #No DC in incarceration data
+
+tidy_incarceration <- merge(resident_summary2, incarceration3, by = c("state_vector", "race", "year"), all.x = T)
+
+tidy_incarceration <- tidy_incarceration %>% mutate(incarceration_rate_per100k = (num_incarcerated/num_residents)*100000)
+```
+
+# Export data for viz purposes
+
+```{r}
+# Find ave incarceration rate
+tidy_incarceration2 <- tidy_incarceration %>% select(-num_residents, -num_incarcerated)
+
+# Pivot wider
+tidy_incarceration_wide <- tidy_incarceration2 %>% pivot_wider(names_from = c(year, race), values_from = incarceration_rate_per100k)
+
+tidy_incarceration_wide %<>% rename_with(~ paste0("incarceration_rate_", .))
+
+# Find 5-year averages 
+
+tidy_incarceration_wide %<>%
+  mutate(white_incarceration_rate_2010_2014 = 
+           rowMeans(tidy_incarceration_wide[,12:16], na.rm = TRUE), 
+         
+         white_incarceration_rate_2015_2019 = 
+           rowMeans(tidy_incarceration_wide[,17:21], na.rm = TRUE), 
+         
+         black_incarceration_rate_2010_2014 = 
+           rowMeans(tidy_incarceration_wide[,2:6], na.rm = TRUE), 
+         
+         black_incarceration_rate_2015_2019 = 
+           rowMeans(tidy_incarceration_wide[,7:11], na.rm = TRUE)
+  )
+
+orig_incarc <- tidy_incarceration_wide %>% mutate(
+  bw_incarc_rr_2019 = black_incarceration_rate_2015_2019 / white_incarceration_rate_2015_2019, 
+  bw_incarc_rr_2014 = black_incarceration_rate_2010_2014 / white_incarceration_rate_2010_2014
+)
+
+write_csv(orig_incarc, "../../data/cleaned/incarceration-ncrp-clean-for-viz.csv")
+```
+
+```{r}
+# 2019
+summary_stats_2019 <- tidy_incarceration %>% 
+  group_by(state_vector, race) %>% 
+  summarise(ave_incarceration_rate_per100k =  mean(incarceration_rate_per100k, na.rm = T),
+            num_years_included = sum(!is.na(num_incarcerated)),
+            ave_population = mean(num_residents),
+            ave_incarcerated = mean(num_incarcerated, na.rm = T))
+
+summary_stats2_2019 <- summary_stats_2019 %>% pivot_wider(names_from = race, values_from = c(ave_incarceration_rate_per100k, num_years_included, ave_population, ave_incarcerated))
+
+summary_stats2_2019 %<>% mutate(bw_rr_incarc = 
+                                  ave_incarceration_rate_per100k_black_nh/
+                                  ave_incarceration_rate_per100k_white_nh)
+
+incarceration_final_2019 <- summary_stats2_2019
+```
+
+```{r}
+incarceration_final_2019 <- incarceration_final_2019 %>% mutate(year = 2019)
+
+# Export data
+write.csv(incarceration_final_2019,"../../data/cleaned/incarceration-ncrp-clean.csv", row.names = FALSE)
+```
+
+

@@ -1,0 +1,826 @@
+---
+title: "Structural Racism LPA - Original 2019 Analysis now with SD"
+author: "Stephanie Veazie"
+date: "2024-02-22"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: yeti
+  pdf_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+## Import data
+
+### Install libraries
+
+```{r}
+install.packages("RColorBrewer")
+```
+
+```{r}
+library(tidyverse)
+library(statebins)
+library(ggrepel)
+library(cowplot)
+library(knitr)
+library(magrittr)
+library(dplyr)
+library(mapproj)
+library(usmap)
+library(foreign)
+library(haven)
+library(RColorBrewer)
+```
+
+### Import LPA results 
+
+```{r}
+# Import LPA results
+
+lpa_results <- read_csv("../../data/cleaned/lpa_all_classes_2019_original_no_dc.csv")
+
+# Factor data
+lpa_results$two_class<-as.factor(lpa_results$two_class)
+lpa_results$three_class<-as.factor(lpa_results$three_class)
+lpa_results$four_class<-as.factor(lpa_results$four_class)
+lpa_results$five_class<-as.factor(lpa_results$five_class)
+
+#Recode data to switch 1 and 2 for three_class for visualization purposes 
+lpa_results_2 <- lpa_results %>% mutate(three_class_reordered = 
+                                          case_when(three_class == 2 ~ 1,
+                                                    three_class == 1 ~ 2,
+                                                    three_class == 3 ~ 3))
+#Factor data
+lpa_results_2$three_class_reordered<-as.factor(lpa_results_2$three_class_reordered)
+
+# Save as dataframe
+lpa_results_2<-as.data.frame(lpa_results_2)
+```
+
+### Import structural racism domain data
+
+```{r}
+# Import structural racism domain data
+structural_racism <- read.dta("../../data/cleaned/structural_racism_2019_original_incarceration_var_no_dc.dta")
+
+# Merge structural racism domain & LPA Result datasets
+structural_racism_with_lpa <- merge(structural_racism, lpa_results_2, by.x = "state", by.y = "state")
+
+# Export for comparison file 
+write_csv(structural_racism_with_lpa, "../../data/cleaned/combined_results_2019_original_incarc_no_dc.csv")
+```
+
+### Import US Census region & division data
+
+```{r}
+# Download file on US Census Regions & Divisions from https://github.com/cphalpert/census-regions/blob/master/us%20census%20bureau%20regions%20and%20divisions.csv
+
+# Import data on US Census Bureau region & division
+us_census<- read.csv("../../data/raw/us-census/us_census_bureau_regions_and_divisions.csv")
+
+# Remove DC
+us_census<- us_census %>% filter(State !="District of Columbia")
+
+# Merge with existing dataset
+lpa_results_r <- merge(structural_racism_with_lpa, us_census, by.x = "state", by.y = "State")
+```
+
+## Maps
+
+### Add additional data needed for mapping
+
+```{r}
+# Generate centroid_labels dataset
+centroid_labels <- usmapdata::centroid_labels(regions = "states")
+
+# Extract x and y coordinates from the geom column
+centroid_labels <- centroid_labels %>%
+  mutate(
+    x = as.numeric(str_extract(geom, "-?\\d+\\.?\\d*")),  # Extract first number (x)
+    y = as.numeric(str_extract(geom, "(?<= )[\\-0-9.]+")) # Extract second number (y)
+  )
+
+# Subset into 2 datasets
+centroid_labels_most <- centroid_labels[!(centroid_labels$abbr %in% 
+                                            c("VT", "NH", "MA", "RI", "CT", 
+                                              "NJ", "DE", "MD", "HI")),]
+
+centroid_labels_east <- centroid_labels[(centroid_labels$abbr %in% 
+                                            c("VT", "NH", "MA", "RI", "CT", 
+                                              "NJ", "DE", "MD")),]
+
+centroid_labels_hi <- centroid_labels[(centroid_labels$abbr == "HI"),]
+
+# Combine centroid_labels_most with lpa_results_r
+most_states <- merge(lpa_results_r, centroid_labels_most, by.x = "state", by.y = "full")
+
+# Combine centroid_labels_east with lpa_results_r and reorder
+east_states <- merge(lpa_results_r, centroid_labels_east, by.x = "state", by.y = "full")
+east_states_ordered <- east_states[c(8,5,4,7,1,6,2,3),]
+
+# Combine centroid_labels_hi with lpa_results_r
+hi_state <- merge(lpa_results_r, centroid_labels_hi, by.x = "state", by.y = "full")
+```
+
+
+### Map of 2-class model
+
+```{r}
+update_geom_defaults("text", list(size= 7))
+                     
+viz1 <-  plot_usmap(regions = "states", 
+             labels = FALSE, 
+             data = lpa_results_r,
+             values = "two_class") +
+  scale_fill_manual(values = c("1"= "#E69F00", "2" = "#56B4E9"), 
+                    name = "Typology",
+                    na.translate = F) +
+  theme(legend.position = "right", legend.text = element_text(size=22), 
+        legend.title =element_text(size=22)) + 
+  geom_text(data = most_states, 
+            ggplot2::aes(x = x, y = y, 
+                         label = abbr), color = "black") + 
+  geom_segment(data = east_states_ordered, 
+            ggplot2::aes(x = x, xend = 2600000, y = y, yend = (-3:4)*(-150000), 
+                         label = abbr), color = "black") + 
+  geom_text(data = east_states_ordered, 
+            ggplot2::aes(x=2700000, y=(-3:4)*(-150000), label = abbr), color = "black") +
+  geom_segment(data = hi_state, 
+            ggplot2::aes(x = x, xend = (-60000), y = y, yend = (-2300000), 
+                         label = abbr), color = "black") +  
+  geom_text(data = hi_state, 
+            ggplot2::aes(x=(-50000), y=(-2400000), label = abbr), color = "black")
+
+jpeg(filename= "../../data/viz/viz_map_2_class_2019_original_incarc_var.jpeg", width= 900, height= 600, quality= 100)
+print(viz1)
+```
+
+```{r, echo = TRUE}
+# Display vertical plot
+include_graphics("../../data/viz/viz_map_2_class_2019_original_incarc_var.jpeg")
+```
+
+### Map of 3-class model
+
+```{r}
+viz2 <-  plot_usmap(regions = "states", 
+             labels = FALSE, 
+             data = lpa_results_r,
+             values = "three_class_reordered") +
+  scale_fill_manual(values = c("1"= "#CCCCFF", "2" = "#9999FF", "3" = "#6666FF"), 
+                    name = "Typology", na.translate = F) + 
+  theme(legend.position = "right", legend.text = element_text(size=22), legend.title = element_text(size=22)) + 
+  geom_text(data = most_states, 
+            ggplot2::aes(x = x, y = y, 
+                         label = abbr), color = "black") + 
+  geom_segment(data = east_states_ordered, 
+            ggplot2::aes(x = x, xend = 2600000, y = y, yend = (-3:4)*(-150000), 
+                         label = abbr), color = "black") + 
+  geom_text(data = east_states_ordered, 
+            ggplot2::aes(x=2700000, y=(-3:4)*(-150000), label = abbr), color = "black") +
+  geom_segment(data = hi_state, 
+            ggplot2::aes(x = x, xend = (-60000), y = y, yend = (-2300000), 
+                         label = abbr), color = "black") +  
+  geom_text(data = hi_state, 
+            ggplot2::aes(x=(-50000), y=(-2400000), label = abbr), color = "black")
+
+jpeg(filename= "../../data/viz/viz_map_3_class_2019_original_incarc_var.jpeg", width= 900, height= 600, quality= 100)
+print(viz2)
+```
+
+```{r}
+# Display vertical plot
+include_graphics("../../data/viz/viz_map_3_class_2019_original_incarc_var.jpeg")
+```
+
+### Map of 4-class model
+
+```{r}
+viz3 <-  plot_usmap(regions = "states", 
+             labels = FALSE, 
+             data = lpa_results_r,
+             values = "four_class") +
+  scale_fill_manual(values = c("1"= "#E69F00", "2" = "#56B4E9", "3" = "#009E73", 
+                               "4" = "#F0E442"), name = "Typology", 
+                    na.translate = F) + 
+  theme(legend.position = "right", legend.text = element_text(size=22), legend.title = element_text(size=22)) + 
+  geom_text(data = most_states, 
+            ggplot2::aes(x = x, y = y, 
+                         label = abbr), color = "black") + 
+  geom_segment(data = east_states_ordered, 
+            ggplot2::aes(x = x, xend = 2600000, y = y, yend = (-3:4)*(-150000), 
+                         label = abbr), color = "black") + 
+  geom_text(data = east_states_ordered, 
+            ggplot2::aes(x=2700000, y=(-3:4)*(-150000), label = abbr), color = "black") +
+  geom_segment(data = hi_state, 
+            ggplot2::aes(x = x, xend = (-60000), y = y, yend = (-2300000), 
+                         label = abbr), color = "black") +  
+  geom_text(data = hi_state, 
+            ggplot2::aes(x=(-50000), y=(-2400000), label = abbr), color = "black")
+
+jpeg(filename= "../../data/viz/viz_map_4_class_2019_original_incarc_var.jpeg", width= 900, height= 600, quality= 100)
+print(viz3)
+```
+
+```{r}
+# Display vertical plot
+include_graphics("../../data/viz/viz_map_4_class_2019_original_incarc_var.jpeg")
+```
+
+### Map of 5-class model
+
+```{r}
+viz4 <-  plot_usmap(regions = "states", 
+             labels = FALSE, 
+             data = lpa_results_r,
+             values = "five_class") +
+  scale_fill_manual(values = c("1"= "#E69F00", "2" = "#56B4E9", "3" = "#009E73", 
+                               "4" = "#F0E442", "5" = "#CC79A7"), name = "Typology", 
+                    na.translate = F) + 
+  theme(legend.position = "right", legend.text = element_text(size=22), legend.title = element_text(size=22)) + 
+  geom_text(data = most_states, 
+            ggplot2::aes(x = x, y = y, 
+                         label = abbr), color = "black") + 
+  geom_segment(data = east_states_ordered, 
+            ggplot2::aes(x = x, xend = 2600000, y = y, yend = (-3:4)*(-150000), 
+                         label = abbr), color = "black") + 
+  geom_text(data = east_states_ordered, 
+            ggplot2::aes(x=2700000, y=(-3:4)*(-150000), label = abbr), color = "black") +
+  geom_segment(data = hi_state, 
+            ggplot2::aes(x = x, xend = (-60000), y = y, yend = (-2300000), 
+                         label = abbr), color = "black") +  
+  geom_text(data = hi_state, 
+            ggplot2::aes(x=(-50000), y=(-2400000), label = abbr), color = "black")
+
+jpeg(filename= "../../data/viz/viz_map_5_class_2019_original_incarc_var.jpeg", width= 900, height= 600, quality= 100)
+print(viz4)
+```
+
+```{r}
+# Display vertical plot
+include_graphics("../../data/viz/viz_map_5_class_2019_original_incarc_var.jpeg")
+```
+
+## Cluster plots
+
+$~$
+
+### Cluster plot of 2-class model
+
+```{r}
+#Create new dataset with median values for each variable for each class
+
+# Copy dataset
+med_data <- lpa_results_r
+
+# Subset by class
+class1<- med_data %>% filter(two_class == 1)
+class2<- med_data %>% filter(two_class == 2)
+
+class1<- class1 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+class2<- class2 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+# Combine datasets
+all_classes<- rbind(class1, class2)
+```
+
+```{r}
+# Create legend function
+legend_function <- function(all_classes, class_prediction){
+  legendplot<- ggplot(all_classes, aes(class_prediction, no_college_RR,label=State.Code, color=Region)) +
+  geom_point() +
+  geom_text_repel(max.overlaps = 100, nudge_x=.05) +
+  xlab("Typlogy") +
+  ylab("Black-White ratio in % with no college degree") +
+  ggtitle("Education inequity") + 
+  theme(legend.position = "bottom", text= element_text(size=40),
+        legend.key.size = 1.5, "cm") + 
+    guides(color = guide_legend(override.aes= list(size=30)))
+}
+```
+
+```{r}
+# Create education function
+education_function <- function(all_classes, class_prediction){
+  p2 <- ggplot(all_classes, aes(class_prediction, no_college_RR,label=State.Code, color=Region)) +
+  ylim(.98,1.42) +
+  geom_point() +
+  geom_text_repel(label=all_classes$State.Code, size=9, max.overlaps=20, nudge_x=.005, nudge_y=.005, segment.color= "transparent") +
+  xlab("Typlogy") +
+  ylab("Black-White ratio in % of people with no college degree") +
+  ggtitle("Educational inequity") + 
+  geom_point(data= all_classes, aes(x=class_prediction, y=education_median), col= "black", pch = 8, size = 5) +
+  theme_bw() +
+  theme(plot.title = element_text(face= "bold", hjust = .5, size=40), legend.position = "none", text= element_text(size=35),
+        axis.title.y = (text=element_text(size=32)), axis.title.x=(text=element_text(size=40)))
+}
+```
+
+```{r}
+# Create unemployment function
+unemployment_function <- function(all_classes, class_prediction){
+  p3 <- ggplot(all_classes, aes(class_prediction, unemployment_RR,label=State.Code, color=Region, show.legend = FALSE)) +
+  ylim(.90,3.4) +
+  geom_point() +
+  geom_text_repel(label=all_classes$State.Code, size=9, max.overlaps=20, nudge_x=.005, nudge_y=.005, segment.color= "transparent") +
+  xlab("Typlogy") +
+  ylab("Black-White ratio in unemployment rate") +
+  ggtitle("Employment inequity") + 
+  geom_point(data= all_classes, aes(x=class_prediction, y=unemployment_median), col= "black", pch = 8, size = 5) +
+  theme_bw() + 
+  theme(plot.title = element_text(face= "bold", hjust = .5, size=40), legend.position = "none", text= element_text(size=40),
+        axis.title.y = (text=element_text(size=32)), axis.title.x=(text=element_text(size=40)))
+}
+```
+
+```{r}
+# Create income function
+income_function <- function(all_classes, class_prediction){
+  p4 <- ggplot(all_classes, aes(class_prediction, median_income_ratio,label=State.Code, color=Region, show.legend = FALSE)) +
+  geom_point() +
+  geom_text_repel(label=all_classes$State.Code, size=9, max.overlaps=20, nudge_x=.005, nudge_y=.005, segment.color= "transparent") +
+  xlab("Typlogy") +
+  ylab("White-Black ratio in median income") +
+  ggtitle("Income inequity") + 
+  geom_point(data= all_classes, aes(x=class_prediction, y=income_median), col= "black", pch = 8, size = 5) +
+  theme_bw() +
+  theme(plot.title = element_text(face= "bold", hjust = .5, size=40), legend.position = "none", text= element_text(size=40),
+        axis.title.y = (text=element_text(size=32)), axis.title.x=(text=element_text(size=40)))
+}
+```
+
+```{r} 
+# Create homeownership function
+homeownership_function <- function(all_classes, class_prediction){
+p5 <- ggplot(all_classes, aes(class_prediction, renters_RR,label=State.Code, color=Region, show.legend = FALSE)) +
+  geom_point() +
+  geom_text_repel(label=all_classes$State.Code, size=9, max.overlaps=20, nudge_x=.005, nudge_y=.005, segment.color= "transparent") +
+  xlab("Typlogy") +
+  ylab("Black-White ratio in % of homes that are renter-occupied") + 
+  ggtitle("Homeownership inequity") +
+  geom_point(data= all_classes, aes(x=class_prediction, y=renters_median), col= "black", pch = 8, size = 5) +
+  theme_bw() +
+    theme(plot.title = element_text(face= "bold", hjust = .5, size=40), legend.position = "none", text= element_text(size=40), axis.title.y = (text=element_text(size=32)), axis.title.x=(text=element_text(size=40)))
+}
+```
+
+```{r}
+# Create incarceration function
+incarceration_function <- function(all_classes, class_prediction){
+p6 <- ggplot(all_classes, aes(class_prediction, incarceration_RR,label=State.Code, color=Region, show.legend = FALSE)) +
+  geom_point() +
+  geom_text_repel(label=all_classes$State.Code, size=9, max.overlaps=20, nudge_x=.005, nudge_y=.005, segment.color= "transparent") +
+  xlab("Typlogy") +
+  ylab("Black-White ratio in incarceration rates") + 
+  ggtitle("Incarceration inequity") + 
+  geom_point(data= all_classes, aes(x=class_prediction, y=incarceration_median), col= "black", pch = 8, size= 5) +
+  theme_bw() + 
+  theme(plot.title = element_text(face= "bold", hjust = .5, size=40), legend.position = "none", text= element_text(size=40),
+        axis.title.y = (text=element_text(size=32)), axis.title.x=(text=element_text(size=40)))
+}
+```
+
+```{r}
+# Call functions
+legendplot <- legend_function(all_classes, all_classes$two_class)
+p2 <- education_function(all_classes, all_classes$two_class)
+p3 <- unemployment_function(all_classes, all_classes$two_class)
+p4 <- income_function(all_classes, all_classes$two_class)
+p5 <- homeownership_function(all_classes, all_classes$two_class)
+p6 <- incarceration_function(all_classes, all_classes$two_class)
+```
+
+```{r}
+# Create vertical plot (paper-style)
+legend_1<- get_legend(legendplot +
+                     guides(color=guide_legend(nrow=1)) +
+                     theme(legend.position="right", legend.key.size= unit(.75, "cm") ))
+
+prow<- plot_grid(p2, NA, p3, NA, p5, NA, NA, NA, NA, NA, p6, NA, p4, NA, legend_1, nrow=3, rel_widths=c(1, .1, 1, .1, 1, .1, .1, .1, .1, .1, 1, .1, 1, .1, 1), rel_heights= c(1, .1, 1))
+  
+paper<- plot_grid(prow, ncol=1)
+
+jpeg(filename= "../../data/viz/viz_cluster_plot_2_class_original_incarc_var.jpeg", width= 1800, height= 1900, quality= 100)
+print(paper)
+```
+
+```{r}
+# Display vertical plot
+include_graphics("../../data/viz/viz_cluster_plot_2_class_original_incarc_var.jpeg")
+```
+
+```{r}
+# Create horizontal plot (poster-style)
+# legend<- get_legend(legendplot +
+#                     guides(color=guide_legend(nrow=1)) +
+#                     theme(legend.position="bottom", legend.key.size= unit(.75, "cm") ))
+
+# prow<- plot_grid(NA, p2, NA, p3, NA, p5, NA, p6, NA, p4, NA, nrow=1, rel_widths=c(.1, 1, .1, 1, .1, 1, .1, 1, .1, 1, .1))
+  
+# poster<- plot_grid(prow, legend, ncol=1, rel_heights = c(1, .1))
+
+# poster 
+
+# jpeg(filename= "two_class_cluster_plot_poster_grid.jpeg", width= 3000, height= 1200, quality= 100)
+# print(poster)
+```
+
+$~$
+
+### Cluster plot of 3-class model
+
+```{r}
+#Create new dataset with median values for each variable for each class
+
+# Copy dataset
+med_data <- lpa_results_r
+
+# Subset by class
+class1<- med_data %>% filter(three_class_reordered == 1)
+class2<- med_data %>% filter(three_class_reordered == 2)
+class3<- med_data %>% filter(three_class_reordered == 3)
+
+class1<- class1 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+class2<- class2 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+class3<- class3 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+# Combine datasets
+all_classes<- rbind(class1, class2, class3)
+```
+
+```{r}
+# Call functions
+legendplot <- legend_function(all_classes, all_classes$three_class_reordered)
+p2 <- education_function(all_classes, all_classes$three_class_reordered)
+p3 <- unemployment_function(all_classes, all_classes$three_class_reordered)
+p4 <- income_function(all_classes, all_classes$three_class_reordered)
+p5 <- homeownership_function(all_classes, all_classes$three_class_reordered)
+p6 <- incarceration_function(all_classes, all_classes$three_class_reordered)
+```
+
+```{r}
+# Create vertical plot (paper-style)
+legend_1<- get_legend(legendplot +
+                     guides(color=guide_legend(nrow=1)) +
+                     theme(legend.position="right", legend.key.size= unit(.75, "cm")))
+
+prow<- plot_grid(p2, NA, p3, NA, p5, NA, NA, NA, NA, NA, p6, NA, p4, NA, legend_1, nrow=3, rel_widths=c(1, .1, 1, .1, 1, .1, .1, .1, .1, .1, 1, .1, 1, .1, 1), rel_heights= c(1, .1, 1))
+  
+paper<- plot_grid(prow, ncol=1)
+
+jpeg(filename= "../../data/viz/viz_cluster_plot_3_class_original_incarc_var.jpeg", width= 1800, height= 1900, quality= 100)
+print(paper)
+```
+
+```{r}
+# Display vertical plot
+include_graphics("../../data/viz/viz_cluster_plot_3_class_original_incarc_var.jpeg")
+```
+
+# Create vertical plot v2
+legend_1<- get_legend(legendplot +
+                     guides(color=guide_legend(nrow=1)) +
+                     theme(legend.position="right", legend.key.size= unit(.75, "cm") ))
+
+prow<- plot_grid(p2, NA, p3, nrow=1, rel_widths=c(1, .2, 1))
+  
+paper<- plot_grid(prow, NA, legend_1, nrow = 3, rel_heights = c(1, 0.01, .2))
+
+jpeg(filename= "../../data/viz/viz_cluster_plot_3_class_original_incarc_var_v2.jpeg", width= 1100, height= 1000, quality= 100)
+print(paper)
+
+# Display vertical plot
+include_graphics("../../data/viz/viz_cluster_plot_3_class_original_incarc_var_v2.jpeg")
+
+
+$~$
+
+### Cluster plot of 4-class model
+
+```{r}
+#Create new dataset with median values for each variable for each class
+
+# Copy dataset
+med_data <- lpa_results_r
+
+# Subset by class
+class1<- med_data %>% filter(four_class == 1)
+class2<- med_data %>% filter(four_class == 2)
+class3<- med_data %>% filter(four_class == 3)
+class4<- med_data %>% filter(four_class == 4)
+
+
+class1<- class1 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+class2<- class2 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+class3<- class3 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+class4<- class4 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+# Combine datasets
+all_classes<- rbind(class1, class2, class3, class4)
+```
+
+```{r}
+# Call functions
+legendplot <- legend_function(all_classes, all_classes$four_class)
+p2 <- education_function(all_classes, all_classes$four_class)
+p3 <- unemployment_function(all_classes, all_classes$four_class)
+p4 <- income_function(all_classes, all_classes$four_class)
+p5 <- homeownership_function(all_classes, all_classes$four_class)
+p6 <- incarceration_function(all_classes, all_classes$four_class)
+```
+
+```{r}
+# Create vertical plot (paper-style)
+legend_1<- get_legend(legendplot +
+                     guides(color=guide_legend(nrow=1)) +
+                     theme(legend.position="right", legend.key.size= unit(.75, "cm") ))
+
+prow<- plot_grid(p2, NA, p3, NA, p5, NA, NA, NA, NA, NA, p6, NA, p4, NA, legend_1, nrow=3, rel_widths=c(1, .1, 1, .1, 1, .1, .1, .1, .1, .1, 1, .1, 1, .1, 1), rel_heights= c(1, .1, 1))
+  
+paper<- plot_grid(prow, ncol=1)
+
+jpeg(filename= "../../data/viz/viz_cluster_plot_4_class_original_incarc_var.jpeg", width= 1700, height= 1900, quality= 100)
+print(paper)
+```
+
+```{r}
+# Display vertical plot
+include_graphics("../../data/viz/viz_cluster_plot_4_class_original_incarc_var.jpeg")
+```
+
+### Cluster plot of 5-class model
+
+```{r}
+#Create new dataset with median values for each variable for each class
+
+# Copy dataset
+med_data <- lpa_results_r
+
+# Subset by class
+class1<- med_data %>% filter(five_class == 1)
+class2<- med_data %>% filter(five_class== 2)
+class3<- med_data %>% filter(five_class == 3)
+class4<- med_data %>% filter(five_class == 4)
+class5<- med_data %>% filter(five_class == 5)
+
+class1<- class1 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+class2<- class2 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+class3<- class3 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+class4<- class4 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+class5<- class5 %>% mutate(
+  education_median = median(no_college_RR, na.rm= TRUE), 
+  unemployment_median = median(unemployment_RR, na.rm= TRUE), 
+  income_median = median(median_income_ratio, na.rm = TRUE), 
+  renters_median = median(renters_RR, na.rm = TRUE), 
+  incarceration_median = median(incarceration_RR, na.rm= TRUE)
+)
+
+# Combine datasets
+all_classes<- rbind(class1, class2, class3, class4, class5)
+```
+
+```{r}
+# Call functions
+legendplot <- legend_function(all_classes, all_classes$five_class)
+p2 <- education_function(all_classes, all_classes$five_class)
+p3 <- unemployment_function(all_classes, all_classes$five_class)
+p4 <- income_function(all_classes, all_classes$five_class)
+p5 <- homeownership_function(all_classes, all_classes$five_class)
+p6 <- incarceration_function(all_classes, all_classes$five_class)
+```
+
+```{r}
+# Create vertical plot (paper-style)
+legend_1<- get_legend(legendplot +
+                     guides(color=guide_legend(nrow=1)) +
+                     theme(legend.position="right", legend.key.size= unit(.75, "cm") ))
+
+prow<- plot_grid(p2, NA, p3, NA, p5, NA, NA, NA, NA, NA, p6, NA, p4, NA, legend_1, nrow=3, rel_widths=c(1, .1, 1, .1, 1, .1, .1, .1, .1, .1, 1, .1, 1, .1, 1), rel_heights= c(1, .1, 1))
+  
+paper<- plot_grid(prow, ncol=1)
+
+jpeg(filename= "../../data/viz/viz_cluster_plot_5_class_original_incarc_var.jpeg", width= 1700, height= 1900, quality= 100)
+print(paper)
+```
+
+```{r}
+# Display vertical plot
+include_graphics("../../data/viz/viz_cluster_plot_5_class_original_incarc_var.jpeg")
+```
+
+## Sankey plot
+
+```{r, eval = T}
+dat <- read.csv("../../data/cleaned/lpa_all_classes_2019_original_no_dc.csv")
+
+dat2 <- merge(dat, us_census, by.x = "state", by.y = "State")
+
+ dat2 %<>% mutate(two_class_recoded = two_class,
+                three_class_recoded = case_when(three_class == 2 ~ 1,
+                                                three_class == 1 ~ 2,
+                                                three_class == 3 ~ 3),
+
+                four_class_recoded = case_when(four_class == 3 ~ 3,
+                                               four_class == 1 ~ 1,
+                                               four_class == 2 ~ 2, 
+                                               four_class == 4 ~ 4),
+
+                five_class_recoded = case_when(five_class == 2 ~ 2, 
+                                               five_class == 5 ~ 5, 
+                                               five_class == 1 ~ 1, 
+                                                five_class == 3 ~ 3,
+                                                five_class == 4 ~ 4)
+)
+
+dat_long <- dat2 %>% select(-ends_with("class")) %>% pivot_longer(cols = ends_with("recoded"), names_to = "model", values_to = "value")
+
+dat_long %<>% mutate(model_f = factor(model, 
+                                      levels = c("two_class_recoded", "three_class_recoded",
+                                                 "four_class_recoded", "five_class_recoded")
+                                      ),
+                     model_num = case_when(model == "two_class_recoded" ~ 2, 
+                                           model == "three_class_recoded" ~ 3, 
+                                           model == "four_class_recoded" ~ 4, 
+                                           model == "five_class_recoded" ~ 5)
+                     )
+
+dat_long %<>% rowwise() %>% mutate(value_jitter = value + rnorm(1, 0, 0.1))
+
+dat_long %<>% group_by(state) %>% arrange(model_num) %>% mutate(model_5_value = last(value))
+
+str(dat_long$model)
+
+p <- ggplot(dat_long, aes(x = model_num, y = value_jitter)) + 
+  geom_point(aes(group = state, col = factor(model_5_value))) + 
+  geom_line(aes(group = state, col = factor(model_5_value))) + 
+  labs(x = "Number of latent typologies used in model", 
+       y = "Typology indicator") + 
+  scale_y_continuous(labels = c("1", "2", "3", "4", "5"), breaks = c(1, 2, 3, 4, 5)) + 
+  scale_color_manual(values = c(
+    "1" = "#1F78B4", 
+    "2" = "#33A02C",  
+    "3" = "#E31A1C",   
+    "4" = "#E6AB02", 
+    "5" = "#6A3D9A")) +
+  theme_bw() + 
+  theme(legend.position="none") 
+  
+
+# Filter and collect `state` values where `model_5_value` is 5
+list_state_names <- function(num){
+  state_list <- dat_long %>%
+  filter(model_5_value == num) %>%
+  distinct(State.Code) %>%
+  pull(State.Code) %>%
+  paste(collapse = ", ")
+  
+  state_list_split <- str_c(state_list, collapse = ", ") %>%
+  str_wrap(width =23) # Adjust width as needed
+  }
+
+type_5 <- list_state_names(5)
+type_4 <- list_state_names(4)
+type_3 <- list_state_names(3)
+type_2 <- list_state_names(2)
+type_1 <- list_state_names(1)
+
+p + annotate(
+  "label",
+  x = 6.7, y = 4.9,  
+  label = paste(type_5),
+  hjust = 1.18, vjust = .1, 
+  size = 4, color = "#6A3D9A", fill = "white", label.size = .1) + 
+  
+  annotate(
+  "label",
+  x = 6.7, y = 4,  # Position at bottom-right; adjust as needed
+  label = paste(type_4),
+  hjust = 1.15, vjust = .1, # Position adjustments
+  size = 4, color = "#E6AB02", fill = "white", label.size = .1) + 
+
+  annotate(
+  "label",
+  x = 6.7, y = 2.9,  # Position at bottom-right; adjust as needed
+  label = paste(type_3),
+  hjust = 1.05, vjust = .1, # Position adjustments
+  size = 4, color = "#E31A1C", fill = "white", label.size = .1) + 
+  
+  annotate(
+  "label",
+  x = 6.7, y = 1.9,  # Position at bottom-right; adjust as needed
+  label = paste(type_2),
+  hjust = 1.05, vjust = 0, # Position adjustments
+  size = 4, color = "#33A02C", fill = "white", label.size = .1) +
+  
+  annotate(
+  "label",
+  x = 6.7, y = .6,  # Position at bottom-right; adjust as needed
+  label = paste(type_1),
+  hjust = 1, vjust = 0, # Position adjustments
+  size = 4, color = "#1F78B4", fill = "white", label.size = .1) 
+
+  ggsave(filename = "../../data/viz/viz_sankey_plot_2019_original_incarc_var_v2.png", device = "png", width = 7, height = , dpi = 600)
+
+
+#  geom_text(
+#    data = dat_long %>% dplyr::group_by(state) %>% dplyr::filter(model_num == max(model_num)),
+#    aes(label = state),
+#    hjust = -0.2, # Adjust this value as needed to position the label near the end of the line
+#    col = "black", 
+#    size = 3 # Or use `col = factor(model_5_value)` if you want color matching
+#   ) 
+```

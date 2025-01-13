@@ -1,0 +1,167 @@
+---
+title: "Education data cleaning"
+author: "Stephanie Veazie"
+date: "2022-12-02"
+output:
+  word_document: default
+  html_document: default
+---
+
+## Download data 
+
+1. Go to https://data.census.gov/cedsci/
+
+2. Select "advanced search." 
+
+3. Using the filter pane on the left-hand side of the page, under "Geography", select "State" then "All states with in the US, Puerto Rico, and the Island Areas." 
+
+4. Under "Topics," select "Education" then "Educational attainment."
+
+5. Under "Topics" select "Race and ethnicity" then "Race and Ethnicity" again.
+
+6. Under "Surveys" select "American Community Survey", then "5-Year Estimates" then "Detailed Tables" 
+
+7. Click blue "Search" button in the bottom right-hand corner.
+
+8. Select "C15002H" for White Alone, Not Hispanic or Latino. 
+
+9. Under drop-down menu, select "2019: ACS 5-year estimates subject tables." Download as a csv file. 
+
+10. In the results pane, select "C15002B" for Black Alone. 
+
+11. Select "2019: ACS 5-year estimates subject tables." Download as a csv file
+
+12. Repeat steps 8-11 but for 2015 ACS 5-year estimates. 
+
+## Load libraries
+
+```{r}
+# Load libraries
+library(tidyverse)
+```
+
+## Import files
+
+```{r}
+# Import files
+white_edu_2019 <- read_csv("../../data/raw/us-census/ACSDT5Y2019.C15002H-2024-08-14T232424.csv")
+black_edu_2019 <- read_csv("../../data/raw/us-census/ACSDT5Y2019.C15002B-2024-08-14T232533.csv")
+```
+
+## Create function to clean csv file
+
+```{r}
+clean_edu_census_file <- function(file_name){
+  
+edu <- file_name
+
+# Select only label and estimate columns 
+edu_2 <- edu %>% select(contains("Label") | contains("!!Estimate"))
+
+# Create a gender vector
+gender_vec <- c("both_genders", rep("male", 5), rep("female", 5))
+
+# Combine gender vector + dataset 
+edu_3 <- cbind(gender_vec, edu_2)
+
+# Rename label col
+edu_4 <- edu_3 %>% rename("variable" = "Label (Grouping)")
+
+# Create new col with cleaner variable names
+edu_5 <- edu_4 %>% mutate(variable_renamed =
+                                        case_when(
+                                          grepl("Total:", variable) ~ "total", 
+                                          grepl("Male:", variable) ~ "total", 
+                                          grepl("Female:", variable) ~ "total", 
+                                          grepl("Less than high school diploma", variable) ~ "less_than_hs", 
+                                          grepl("High school graduate", variable) ~ "hs_grad", 
+                                          grepl("Some college or associate's degree", variable) ~ "some_college", 
+                                          grepl("Bachelor's degree or higher", variable) ~ "college_degree", 
+                                        ))
+
+# Rearrange and check results
+edu_6 <- edu_5[,c(1,55,2:54)]
+
+# Remove !!Estimate from col names
+edu_7 <- edu_6 %>% rename_with(~ gsub("!!Estimate", "", .))
+
+# Combine variable and gender cols
+edu_7$variable_final <- paste(edu_7$variable_renamed, edu_7$gender_vec, sep = "_")
+
+# Rearrange cols
+edu_8 <- edu_7[,c(56,1:55)]
+
+# Drop unneeded cols
+edu_9 <- edu_8 %>% subset(select = -c(gender_vec, variable_renamed, variable))
+
+# Transpose data
+edu_10 <- as.data.frame(t(edu_9))
+
+# Rename columns
+colnames(edu_10) <- edu_10[1,]
+
+# Delete duplicate first row
+edu_11 <- edu_10[-1,]
+
+# Add new column of state names
+edu_11$state <- rownames(edu_11)
+
+# Rearrange
+edu_12 <- edu_11[,c(12,1:11)]
+
+# Delete row names
+rownames(edu_12) <- NULL
+
+# Transform rows 2:12 to numeric
+edu_12[,2:12] <- lapply(edu_12[,2:12], as.numeric)
+
+return(edu_12)
+}
+```
+
+# Apply function to get cleaned datasets
+
+```{r}
+# Create cleaned dataset
+white_edu_clean_2019 <- clean_edu_census_file(white_edu_2019)
+black_edu_clean_2019 <- clean_edu_census_file(black_edu_2019)
+
+# Add race to col names 2-12
+colnames(white_edu_clean_2019)[2:12] <- paste0(colnames(white_edu_clean_2019)[2:12], "_white")
+colnames(black_edu_clean_2019)[2:12] <- paste0(colnames(black_edu_clean_2019)[2:12], "_black")
+```
+
+# Combine datasets
+
+```{r}
+# Combine datasets
+comb_edu_2019 <- left_join(white_edu_clean_2019, black_edu_clean_2019, by = "state")
+
+# Calculate % of white & black pop w/out college degree & B-W RR
+comb_edu_2019_2 <- comb_edu_2019 %>%
+  mutate(
+    percent_no_college_white = 1 -
+      ((college_degree_male_white + college_degree_female_white) / total_both_genders_white), 
+    
+    percent_no_college_black = 1 - 
+      ((college_degree_male_black + college_degree_female_black) / total_both_genders_black),
+    
+    edu_RR = percent_no_college_black / percent_no_college_white
+  ) 
+
+comb_edu_2019_2
+```
+
+# Export
+
+```{r}
+# Add year
+comb_edu_2019_final <- comb_edu_2019_2 %>% mutate(year = 2019)
+
+# Rearrange cols
+comb_edu_2019_final <- comb_edu_2019_final[,c(1,27,2:26)]
+
+# Export
+write_csv(comb_edu_2019_final, "../../data/cleaned/edu-attainment-clean.csv")
+```
+

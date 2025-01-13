@@ -1,0 +1,194 @@
+---
+title: "Merge datasets"
+author: "Stephanie Veazie"
+date: "2022-12-20"
+output:
+  word_document: default
+---
+
+```{r}
+# Load library
+library(tidyverse)
+library(foreign)
+library(magrittr)
+```
+
+# Import education data
+
+```{r}
+# Import data
+no_college<- read_csv("../../data/cleaned/edu-attainment-clean.csv")
+
+# Remove Puerto Rico
+no_college <- no_college %>% filter(state != "Puerto Rico")
+
+# Limit to 2 columns of interest
+no_college_select <- no_college %>% select(state, year, edu_RR)
+
+# 2019 dataset
+no_college_select_2019 <- no_college_select %>% filter(year == 2019)
+no_college_select_2019<- no_college_select_2019 %>% arrange(state)
+```
+
+# Import employment data
+
+```{r}
+# Import data
+unemployment <- read_csv("../../data/cleaned/unemployment-clean.csv")
+
+# Remove Puerto Rico
+unemployment <- unemployment %>% filter(state != "Puerto Rico")
+
+# Limit to 2 columns of interest
+unemployment_select <- unemployment %>% select(state, year, bw_unemploy_RR)
+
+# 2019 dataset
+unemployment_select_2019 <- unemployment_select %>% filter(year == 2019)
+unemployment_select_2019<- unemployment_select_2019 %>% arrange(state)
+```
+
+# Import income
+
+```{r}
+# Import data
+income <- read_csv("../../data/cleaned/income-clean.csv")
+
+# Remove Puerto Rico
+income <- income %>% filter(state != "Puerto Rico")
+
+# Limit to 2 columns of interest
+income_select <- income %>% select(state, year, wb_income_RR)
+
+# 2019 dataset
+income_select_2019 <- income_select %>% filter(year == 2019)
+income_select_2019<- income_select_2019 %>% arrange(state)
+```
+
+# Import homeownership data
+
+```{r}
+# Import data
+homeownership <- read_csv("../../data/cleaned/homeownership-clean.csv")
+
+# Remove Puerto Rico
+homeownership <- homeownership %>% filter(state != "Puerto Rico")
+
+# Limit to 2 columns of interest
+homeownership_select <- homeownership %>% select(state, year, bw_renters_RR)
+
+# Break into 2014 & 2019 datasets
+homeownership_select_2019 <- homeownership_select %>% filter(year == 2019)
+homeownership_select_2019<- homeownership_select_2019 %>% arrange(state)
+```
+
+# Import incarceration data
+
+```{r}
+# Import data
+incarceration_select <- read_csv("../../data/cleaned/incarceration-ncrp-clean.csv")
+
+# rename state fector
+incarceration_select %<>% rename(state = state_vector)
+
+# Limit to 3 columns of interest
+incarceration_select <- incarceration_select %>% select(state, year, bw_rr_incarc)
+
+# 2019 dataset
+incarceration_select_2019 <- incarceration_select %>% filter(year == 2019)
+incarceration_select_2019<- incarceration_select_2019 %>% arrange(state)
+```
+
+# Combine & export original data for 2019
+
+```{r}
+# Merge education & employment datasets
+structural_racism_2019 <- left_join(no_college_select_2019, unemployment_select_2019, by = "state")
+                              
+# Add income dataset
+structural_racism_2019 <- left_join(structural_racism_2019, income_select_2019, by = "state")
+
+# Add renters dataset
+structural_racism_2019 <- left_join(structural_racism_2019, homeownership_select_2019, by = "state")
+
+# Add incarceration dataset
+structural_racism_2019 <- left_join(structural_racism_2019, incarceration_select_2019, by = "state") 
+
+# Remove cols
+structural_racism_2019 %<>% select(-year.x, -year.y, -year.x.x, -year.y.y)
+
+structural_racism_2019 <- structural_racism_2019[,c(1,6,2:5,7)]
+
+# Rename columns
+colnames(structural_racism_2019)<- c("state",
+                                     "year", 
+                                     "no_college_RR", 
+                                     "unemployment_RR", 
+                                     "median_income_ratio", 
+                                     "renters_RR",
+                                     "incarceration_RR")
+```
+
+```{r}
+#Export 2019 dataset to dta (all obs)
+write.dta(
+  structural_racism_2019,
+  "../../data/cleaned/structural_racism_2019_original_incarceration_var.dta")
+```
+
+```{r}
+# Remove DC row
+structural_racism_2019_no_dc <- structural_racism_2019 %>% filter(state != "District of Columbia")
+
+# Export 2014 dataset to dta (no DC)
+write.dta(
+  structural_racism_2019_no_dc,
+  "../../data/cleaned/structural_racism_2019_original_incarceration_var_no_dc.dta")
+```
+
+# Replace 2019 incarceration variable for sensitivity analysis
+
+```{r}
+# Remove current incarceration variable
+sr_2019_alternative <- structural_racism_2019 %>% select(-incarceration_RR)
+
+# Load alternative incarceration variable
+incarc_alt <- read_csv("../../data/cleaned/incarceration-nps-clean-for-viz.csv")
+
+# Filter to 2019 
+incarc_alt_2019 <- incarc_alt %>% filter(year == 2019) %>% select(-year)
+
+# Merge
+sr_2019_comb <- left_join(sr_2019_alternative, incarc_alt_2019, by = "state")
+
+#Export 2019 dataset to dta (all obs)
+write.dta(
+  sr_2019_comb,
+  "../../data/cleaned/structural_racism_2019_alt_incarceration_var.dta")
+
+# Remove DC row
+sr_2019_comb_no_dc <- sr_2019_comb %>% filter(state != "District of Columbia")
+
+# Export 2019 dataset to dta (no DC)
+write.dta(
+  sr_2019_comb_no_dc,
+  "../../data/cleaned/structural_racism_2019_alt_incarceration_var_no_dc.dta")
+```
+
+# Calculate median for each domain for dataset including DC
+
+```{r}
+median_education <- median(structural_racism_2019$no_college_RR, na.rm= TRUE)
+median_unemployment <- median(structural_racism_2019$unemployment_RR, na.rm= TRUE)
+median_income <- median(structural_racism_2019$median_income_ratio, na.rm= TRUE)
+median_renters <- median(structural_racism_2019$renters_RR, na.rm= TRUE)
+median_incarceration <- median(structural_racism_2019$incarceration_RR, na.rm= TRUE)
+
+median_education
+median_unemployment
+median_income
+median_renters
+median_incarceration
+```
+
+
+

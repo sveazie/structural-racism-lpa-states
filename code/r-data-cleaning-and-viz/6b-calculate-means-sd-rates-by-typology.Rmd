@@ -1,0 +1,948 @@
+---
+title: "Calculate domain means, sd and B/W rates by typology"
+author: "Stephanie Veazie"
+date: "2022-12-20"
+output:
+  word_document: default
+---
+
+```{r}
+# Load library
+library(tidyverse)
+library(foreign)
+library(magrittr)
+library(janitor)
+```
+
+# Import education data
+
+```{r}
+# Import data
+no_college<- read_csv("../../data/cleaned/edu-attainment-clean.csv")
+
+# Remove Puerto Rico
+no_college <- no_college %>% filter(state != "Puerto Rico")
+
+# Limit to 2 columns of interest
+no_college_select <- no_college %>% select(state, year, percent_no_college_black, percent_no_college_white, edu_RR)
+
+# 2019 dataset
+no_college_select_2019 <- no_college_select %>% filter(year == 2019)
+no_college_select_2019<- no_college_select_2019 %>% arrange(state)
+```
+
+# Import employment data
+
+```{r}
+# Import data
+unemployment <- read_csv("../../data/cleaned/unemployment-clean.csv")
+
+# Remove Puerto Rico
+unemployment <- unemployment %>% filter(state != "Puerto Rico")
+
+# Limit to 2 columns of interest
+unemployment_select <- unemployment %>% select(state, year, unemployment_black, unemployment_white_non_hispanic, bw_unemploy_RR)
+
+# 2019 dataset
+unemployment_select_2019 <- unemployment_select %>% filter(year == 2019)
+unemployment_select_2019<- unemployment_select_2019 %>% arrange(state)
+```
+
+# Import income
+
+```{r}
+# Import data
+income <- read_csv("../../data/cleaned/income-clean.csv")
+
+# Remove Puerto Rico
+income <- income %>% filter(state != "Puerto Rico")
+
+# Limit to 2 columns of interest
+income_select <- income %>% select(state, year, median_income_black, median_income_white_non_hispanic, wb_income_RR)
+
+# 2019 dataset
+income_select_2019 <- income_select %>% filter(year == 2019)
+income_select_2019<- income_select_2019 %>% arrange(state)
+```
+
+# Import homeownership data
+
+```{r}
+# Import data
+homeownership <- read_csv("../../data/cleaned/homeownership-clean.csv")
+
+# Remove Puerto Rico
+homeownership <- homeownership %>% filter(state != "Puerto Rico")
+
+# Limit to 2 columns of interest
+homeownership_select <- homeownership %>% select(state, year, black_renter_occupied_homes_percent, white_renter_occupied_homes_percent, bw_renters_RR)
+
+# Break into 2014 & 2019 datasets
+homeownership_select_2019 <- homeownership_select %>% filter(year == 2019)
+homeownership_select_2019<- homeownership_select_2019 %>% arrange(state)
+```
+# Import NCRP incarceration data
+
+```{r}
+# Import data
+incarceration_ncrp <- read_csv("../../data/cleaned/incarceration-ncrp-clean.csv")
+
+# rename state vector
+incarceration_ncrp %<>% rename(state = state_vector)
+
+# Limit to 3 columns of interest
+incarceration_ncrp <- incarceration_ncrp %>% select(state, 
+                                                    bw_rr_incarc, 
+                                                    ave_incarceration_rate_per100k_black_nh, 
+                                                    ave_incarceration_rate_per100k_white_nh)
+```
+
+# Import NPS incarceration data
+
+```{r}
+# Import data
+incarceration_nps <- read_csv("../../data/cleaned/incarceration-nps-clean.csv")
+
+# rename state fector
+incarceration_nps %<>% rename(state = NAME)
+
+# Limit to 3 columns of interest
+incarceration_nps <- incarceration_nps %>% select(state,
+                                                  white_incarceration_rate_2015_2019,
+                                                  black_incarceration_rate_2015_2019,
+                                                  incarceration_2015_2019_RR)
+```
+
+# Combine & export original data for 2019
+
+```{r}
+# Merge education & employment datasets
+structural_racism_2019 <- left_join(no_college_select_2019, unemployment_select_2019, by = "state")
+                              
+# Add income dataset
+structural_racism_2019 <- left_join(structural_racism_2019, income_select_2019, by = "state")
+
+# Add renters dataset
+structural_racism_2019 <- left_join(structural_racism_2019, homeownership_select_2019, by = "state")
+
+# Add incarceration dataset
+structural_racism_2019 <- left_join(structural_racism_2019, incarceration_ncrp, by = "state") 
+
+# Remove cols
+structural_racism_2019 %<>% select(-year.x, -year.y, -year.x.x, -year.y.y)
+
+# Remove DC row
+structural_racism_2019_no_dc <- structural_racism_2019 %>% filter(state != "District of Columbia")
+```
+
+# Swap out incarceration variable for sensitivity analysis results
+
+```{r}
+# Drop NCRP variables
+structural_racism_2019_nps <- structural_racism_2019_no_dc %>% select(-c(ave_incarceration_rate_per100k_black_nh,
+                                                                      ave_incarceration_rate_per100k_white_nh,
+                                                                      bw_rr_incarc))
+                                                                      
+# Add NPS variable
+structural_racism_2019_nps <- merge(structural_racism_2019_nps, incarceration_nps, by= "state")
+```
+
+# Import LPA results for original analysis
+
+```{r}
+# Import LPA results
+lpa_results <- read_csv("../../data/cleaned/lpa_all_classes_2019_original_no_dc.csv")
+
+#Recode data to switch 1 and 2 for three_class for visualization purposes 
+lpa_results_2 <- lpa_results %>% mutate(three_class_reordered = 
+                                          case_when(three_class == 2 ~ 1,
+                                                    three_class == 1 ~ 2,
+                                                    three_class == 3 ~ 3))
+#Factor data
+lpa_results_2$three_class_reordered<-as.factor(lpa_results_2$three_class_reordered)
+
+# Save as dataframe
+lpa_results_2<-as.data.frame(lpa_results_2)
+
+lpa_results_3_class <- lpa_results_2 %>% select(state, 
+                                                two_class, 
+                                                three_class_reordered, 
+                                                four_class, 
+                                                five_class)
+```
+
+Import LPA results for NPS analysis 
+
+```{r}
+# Import LPA results
+lpa_results_nps <- read_csv("../../data/cleaned/lpa_all_classes_2019_alternative_no_dc.csv")
+
+#Recode data to switch 1 and 2 for three_class for visualization purposes 
+lpa_results_nps <- lpa_results_nps %>% mutate(three_class_reordered = 
+                                          case_when(three_class == 1 ~ 1,
+                                                    three_class == 2 ~ 3,
+                                                    three_class == 3 ~ 2))
+# Save as dataframe
+lpa_results_nps<-as.data.frame(lpa_results_nps)
+
+lpa_results_nps <- lpa_results_nps %>% select(state, three_class_reordered)
+```
+
+```{r}
+# Merge original SR data & class data
+df <- merge(structural_racism_2019_no_dc, lpa_results_3_class, by.x = "state", by.y = "state")
+df <- data.frame(df)
+```
+
+```{r}
+# Merge SR with NPS data & class data
+df_nps <- merge(structural_racism_2019_nps, lpa_results_nps, by = "state")
+```
+
+# Two class model with original NCRP data
+
+```{r}
+# create df of mean & sd of education RR by class  
+edu_RR_df <- df %>%
+  group_by(two_class) %>%
+  summarize(edu_RR_mean = mean(edu_RR, na.rm = TRUE),
+            edu_RR_sd = sd(edu_RR, na.rm = TRUE) ) %>%
+  as.data.frame()
+
+# create df of mean & sd of unemployment RR by class  
+unemploy_RR_df<- df %>%
+  group_by(two_class) %>%
+  summarize(unemploy_RR_mean = mean(bw_unemploy_RR, na.rm = TRUE), 
+            unemploy_RR_sd = sd(bw_unemploy_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# combine datasets
+dataset <- left_join(edu_RR_df, unemploy_RR_df, by = "two_class")
+
+# create df of mean & sd of renters RR by class  
+renters_mean_df <- df %>%
+  group_by(two_class) %>%
+  summarize(renter_RR_mean = mean(bw_renters_RR, na.rm = TRUE), 
+            renter_RR_sd = sd(bw_renters_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, renters_mean_df, by = "two_class")
+
+# create df of mean & sd of incarceration RR by class 
+incarc_mean_df <-  df %>%
+  group_by(two_class) %>%
+  summarize(incarc_RR_mean = mean(bw_rr_incarc, na.rm = TRUE), 
+            incarc_RR_sd = sd(bw_rr_incarc, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, incarc_mean_df, by = "two_class")
+
+# create df of mean & sd of income RR by class  
+med_income_df <- df %>%
+  group_by(two_class) %>%
+  summarize(income_RR_mean = mean(wb_income_RR, na.rm = TRUE), 
+            income_RR_sd = sd(wb_income_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, med_income_df, by = "two_class")
+
+# convert factors to numeric
+dataset$two_class <- as.numeric(dataset$two_class)
+str(dataset)
+
+# get table into correct format
+dataset_t <- t(dataset) # transpose the table to get rownames as column headers
+dataset_t <- dataset_t %>% row_to_names(row_number = 1) # change 1st row to header row
+dataset_t <- round(dataset_t, 2) 
+
+# formatting
+plain_dataset <- rbind(
+cbind(
+paste0(dataset_t[1,1], " (", dataset_t[2,1], ")"),
+paste0(dataset_t[1,2], " (", dataset_t[2,2], ")")),
+
+cbind(
+paste0(dataset_t[3,1], " (", dataset_t[4,1], ")"),
+paste0(dataset_t[3,2], " (", dataset_t[4,2], ")")),
+
+cbind(
+paste0(dataset_t[5,1], " (", dataset_t[6,1], ")"),
+paste0(dataset_t[5,2], " (", dataset_t[6,2], ")")),
+
+cbind(
+paste0(dataset_t[7,1], " (", dataset_t[8,1], ")"),
+paste0(dataset_t[7,2], " (", dataset_t[8,2], ")")),
+
+cbind(
+paste0(dataset_t[9,1], " (", dataset_t[10,1], ")"),
+paste0(dataset_t[9,2], " (", dataset_t[10,2], ")"))
+)
+
+rownames  <- c("Education inequity", 
+               "Employment inequity",
+               "Homeownership inequity", 
+               "Incarceration inequity",
+               "Income inequity"
+               )
+
+plain_dataset <- cbind(rownames, plain_dataset)
+
+plain_dataset <- data.frame(plain_dataset)
+
+colnames(plain_dataset) <- c("Domain", "Type 1", "Type 2")
+
+plain_dataset
+
+ write_csv(plain_dataset, "../../data/cleaned/typology_mean_sd_2_class.csv")
+```
+
+# Three class model with original NCRP data
+
+```{r}
+# create df of mean & sd of education RR by class  
+edu_RR_df <- df %>%
+  group_by(three_class_reordered) %>%
+  summarize(edu_RR_mean = mean(edu_RR, na.rm = TRUE),
+            edu_RR_sd = sd(edu_RR, na.rm = TRUE) ) %>%
+  as.data.frame()
+
+# create df of mean & sd of unemployment RR by class  
+unemploy_RR_df<- df %>%
+  group_by(three_class_reordered) %>%
+  summarize(unemploy_RR_mean = mean(bw_unemploy_RR, na.rm = TRUE), 
+            unemploy_RR_sd = sd(bw_unemploy_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# combine datasets
+dataset <- left_join(edu_RR_df, unemploy_RR_df, by = "three_class_reordered")
+
+# create df of mean & sd of renters RR by class  
+renters_mean_df <- df %>%
+  group_by(three_class_reordered) %>%
+  summarize(renter_RR_mean = mean(bw_renters_RR, na.rm = TRUE), 
+            renter_RR_sd = sd(bw_renters_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, renters_mean_df, by = "three_class_reordered")
+
+# create df of mean & sd of incarceration RR by class 
+incarc_mean_df <-  df %>%
+  group_by(three_class_reordered) %>%
+  summarize(incarc_RR_mean = mean(bw_rr_incarc, na.rm = TRUE), 
+            incarc_RR_sd = sd(bw_rr_incarc, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, incarc_mean_df, by = "three_class_reordered")
+
+# create df of mean & sd of income RR by class  
+med_income_df <- df %>%
+  group_by(three_class_reordered) %>%
+  summarize(income_RR_mean = mean(wb_income_RR, na.rm = TRUE), 
+            income_RR_sd = sd(wb_income_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, med_income_df, by = "three_class_reordered")
+
+# convert factors to numeric
+dataset$three_class_reordered <- as.numeric(dataset$three_class_reordered)
+str(dataset)
+
+# get table into correct format
+dataset_t <- t(dataset) # transpose the table to get rownames as column headers
+dataset_t <- dataset_t %>% row_to_names(row_number = 1) # change 1st row to header row
+dataset_t <- round(dataset_t, 2) 
+
+# formatting
+plain_dataset <- rbind(
+cbind(
+paste0(dataset_t[1,1], " (", dataset_t[2,1], ")"),
+paste0(dataset_t[1,2], " (", dataset_t[2,2], ")"),
+paste0(dataset_t[1,3], " (", dataset_t[2,3], ")")),
+
+cbind(
+paste0(dataset_t[3,1], " (", dataset_t[4,1], ")"),
+paste0(dataset_t[3,2], " (", dataset_t[4,2], ")"),
+paste0(dataset_t[3,3], " (", dataset_t[4,3], ")")),
+
+cbind(
+paste0(dataset_t[5,1], " (", dataset_t[6,1], ")"),
+paste0(dataset_t[5,2], " (", dataset_t[6,2], ")"),
+paste0(dataset_t[5,3], " (", dataset_t[6,3], ")")),
+
+cbind(
+paste0(dataset_t[7,1], " (", dataset_t[8,1], ")"),
+paste0(dataset_t[7,2], " (", dataset_t[8,2], ")"),
+paste0(dataset_t[7,3], " (", dataset_t[8,3], ")")),
+
+cbind(
+paste0(dataset_t[9,1], " (", dataset_t[10,1], ")"),
+paste0(dataset_t[9,2], " (", dataset_t[10,2], ")"),
+paste0(dataset_t[9,3], " (", dataset_t[10,3], ")"))
+)
+
+rownames  <- c("Education inequity", 
+               "Employment inequity",
+               "Homeownership inequity", 
+               "Incarceration inequity", 
+               "Income inequity")
+
+plain_dataset <- cbind(rownames, plain_dataset)
+
+plain_dataset <- data.frame(plain_dataset)
+
+colnames(plain_dataset) <- c("Domain", "Type 1", "Type 2", "Type 3")
+
+plain_dataset
+
+write_csv(plain_dataset, "../../data/cleaned/typology_mean_sd_3_class.csv")
+```
+
+# Four class model with original NCRP data
+
+```{r}
+# create df of mean & sd of education RR by class  
+edu_RR_df <- df %>%
+  group_by(four_class) %>%
+  summarize(edu_RR_mean = mean(edu_RR, na.rm = TRUE),
+            edu_RR_sd = sd(edu_RR, na.rm = TRUE) ) %>%
+  as.data.frame()
+
+# create df of mean & sd of unemployment RR by class  
+unemploy_RR_df<- df %>%
+  group_by(four_class) %>%
+  summarize(unemploy_RR_mean = mean(bw_unemploy_RR, na.rm = TRUE), 
+            unemploy_RR_sd = sd(bw_unemploy_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# combine datasets
+dataset <- left_join(edu_RR_df, unemploy_RR_df, by = "four_class")
+
+# create df of mean & sd of renters RR by class  
+renters_mean_df <- df %>%
+  group_by(four_class) %>%
+  summarize(renter_RR_mean = mean(bw_renters_RR, na.rm = TRUE), 
+            renter_RR_sd = sd(bw_renters_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, renters_mean_df, by = "four_class")
+
+# create df of mean & sd of incarceration RR by class 
+incarc_mean_df <-  df %>%
+  group_by(four_class) %>%
+  summarize(incarc_RR_mean = mean(bw_rr_incarc, na.rm = TRUE), 
+            incarc_RR_sd = sd(bw_rr_incarc, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, incarc_mean_df, by = "four_class")
+
+# create df of mean & sd of income RR by class  
+med_income_df <- df %>%
+  group_by(four_class) %>%
+  summarize(income_RR_mean = mean(wb_income_RR, na.rm = TRUE), 
+            income_RR_sd = sd(wb_income_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, med_income_df, by = "four_class")
+
+# convert factors to numeric
+dataset$four_class <- as.numeric(dataset$four_class)
+str(dataset)
+
+# get table into correct format
+dataset_t <- t(dataset) # transpose the table to get rownames as column headers
+dataset_t <- dataset_t %>% row_to_names(row_number = 1) # change 1st row to header row
+dataset_t <- round(dataset_t, 2) 
+
+# formatting
+plain_dataset <- rbind(
+cbind(
+paste0(dataset_t[1,1], " (", dataset_t[2,1], ")"),
+paste0(dataset_t[1,2], " (", dataset_t[2,2], ")"),
+paste0(dataset_t[1,3], " (", dataset_t[2,3], ")"), 
+paste0(dataset_t[1,4], " (", dataset_t[2,4], ")") 
+),
+
+cbind(
+paste0(dataset_t[3,1], " (", dataset_t[4,1], ")"),
+paste0(dataset_t[3,2], " (", dataset_t[4,2], ")"),
+paste0(dataset_t[3,3], " (", dataset_t[4,3], ")"),
+paste0(dataset_t[3,4], " (", dataset_t[4,4], ")") 
+),
+
+cbind(
+paste0(dataset_t[5,1], " (", dataset_t[6,1], ")"),
+paste0(dataset_t[5,2], " (", dataset_t[6,2], ")"),
+paste0(dataset_t[5,3], " (", dataset_t[6,3], ")"), 
+paste0(dataset_t[5,4], " (", dataset_t[6,4], ")") 
+),
+
+cbind(
+paste0(dataset_t[7,1], " (", dataset_t[8,1], ")"),
+paste0(dataset_t[7,2], " (", dataset_t[8,2], ")"),
+paste0(dataset_t[7,3], " (", dataset_t[8,3], ")"),
+paste0(dataset_t[7,4], " (", dataset_t[8,4], ")")
+),
+
+cbind(
+paste0(dataset_t[9,1], " (", dataset_t[10,1], ")"),
+paste0(dataset_t[9,2], " (", dataset_t[10,2], ")"),
+paste0(dataset_t[9,3], " (", dataset_t[10,3], ")"),
+paste0(dataset_t[9,4], " (", dataset_t[10,4], ")")
+)
+)
+
+rownames  <- c("Education inequity", 
+               "Employment inequity",
+               "Homeownership inequity", 
+               "Incarceration inequity",
+               "Income inequity")
+
+plain_dataset <- cbind(rownames, plain_dataset)
+
+plain_dataset <- data.frame(plain_dataset)
+
+colnames(plain_dataset) <- c("Domain", "Type 1", "Type 2", "Type 3", "Type 4")
+
+plain_dataset
+
+write_csv(plain_dataset, "../../data/cleaned/typology_mean_sd_4_class.csv")
+```
+
+# Five class model with original NCRP data
+
+```{r}
+# create df of mean & sd of education RR by class  
+edu_RR_df <- df %>%
+  group_by(five_class) %>%
+  summarize(edu_RR_mean = mean(edu_RR, na.rm = TRUE),
+            edu_RR_sd = sd(edu_RR, na.rm = TRUE) ) %>%
+  as.data.frame()
+
+# create df of mean & sd of unemployment RR by class  
+unemploy_RR_df<- df %>%
+  group_by(five_class) %>%
+  summarize(unemploy_RR_mean = mean(bw_unemploy_RR, na.rm = TRUE), 
+            unemploy_RR_sd = sd(bw_unemploy_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# combine datasets
+dataset <- left_join(edu_RR_df, unemploy_RR_df, by = "five_class")
+
+# create df of mean & sd of renters RR by class  
+renters_mean_df <- df %>%
+  group_by(five_class) %>%
+  summarize(renter_RR_mean = mean(bw_renters_RR, na.rm = TRUE), 
+            renter_RR_sd = sd(bw_renters_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, renters_mean_df, by = "five_class")
+
+# create df of mean & sd of incarceration RR by class 
+incarc_mean_df <-  df %>%
+  group_by(five_class) %>%
+  summarize(incarc_RR_mean = mean(bw_rr_incarc, na.rm = TRUE), 
+            incarc_RR_sd = sd(bw_rr_incarc, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, incarc_mean_df, by = "five_class")
+
+
+# create df of mean & sd of income RR by class  
+med_income_df <- df %>%
+  group_by(five_class) %>%
+  summarize(income_RR_mean = mean(wb_income_RR, na.rm = TRUE), 
+            income_RR_sd = sd(wb_income_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, med_income_df, by = "five_class")
+
+# convert factors to numeric
+dataset$five_class <- as.numeric(dataset$five_class)
+str(dataset)
+
+# get table into correct format
+dataset_t <- t(dataset) # transpose the table to get rownames as column headers
+dataset_t <- dataset_t %>% row_to_names(row_number = 1) # change 1st row to header row
+dataset_t <- round(dataset_t, 2) 
+
+# formatting
+plain_dataset <- rbind(
+cbind(
+paste0(dataset_t[1,1], " (", dataset_t[2,1], ")"),
+paste0(dataset_t[1,2], " (", dataset_t[2,2], ")"),
+paste0(dataset_t[1,3], " (", dataset_t[2,3], ")"), 
+paste0(dataset_t[1,4], " (", dataset_t[2,4], ")"), 
+paste0(dataset_t[1,5], " (", dataset_t[2,5], ")") 
+),
+
+cbind(
+paste0(dataset_t[3,1], " (", dataset_t[4,1], ")"),
+paste0(dataset_t[3,2], " (", dataset_t[4,2], ")"),
+paste0(dataset_t[3,3], " (", dataset_t[4,3], ")"),
+paste0(dataset_t[3,4], " (", dataset_t[4,4], ")"), 
+paste0(dataset_t[3,5], " (", dataset_t[4,5], ")")
+),
+
+cbind(
+paste0(dataset_t[5,1], " (", dataset_t[6,1], ")"),
+paste0(dataset_t[5,2], " (", dataset_t[6,2], ")"),
+paste0(dataset_t[5,3], " (", dataset_t[6,3], ")"), 
+paste0(dataset_t[5,4], " (", dataset_t[6,4], ")"), 
+paste0(dataset_t[5,5], " (", dataset_t[6,5], ")") 
+),
+
+cbind(
+paste0(dataset_t[7,1], " (", dataset_t[8,1], ")"),
+paste0(dataset_t[7,2], " (", dataset_t[8,2], ")"),
+paste0(dataset_t[7,3], " (", dataset_t[8,3], ")"),
+paste0(dataset_t[7,4], " (", dataset_t[8,4], ")"), 
+paste0(dataset_t[7,5], " (", dataset_t[8,5], ")")
+),
+
+cbind(
+paste0(dataset_t[9,1], " (", dataset_t[10,1], ")"),
+paste0(dataset_t[9,2], " (", dataset_t[10,2], ")"),
+paste0(dataset_t[9,3], " (", dataset_t[10,3], ")"),
+paste0(dataset_t[9,4], " (", dataset_t[10,4], ")"),
+paste0(dataset_t[9,5], " (", dataset_t[10,5], ")")
+)
+)
+
+rownames  <- c("Education inequity", 
+               "Employment inequity",
+               "Homeownership inequity", 
+               "Incarceration inequity", 
+               "Income inequity")
+
+plain_dataset <- cbind(rownames, plain_dataset)
+
+plain_dataset <- data.frame(plain_dataset)
+
+colnames(plain_dataset) <- c("Domain", "Type 1", "Type 2", "Type 3", "Type 4", "Type 5")
+
+plain_dataset
+
+write_csv(plain_dataset, "../../data/cleaned/typology_mean_sd_5_class.csv")
+```
+
+# Three class model with NPS data (sensitivity analysis)
+
+```{r}
+# create df of mean & sd of education RR by class  
+edu_RR_df <- df_nps %>%
+  group_by(three_class_reordered) %>%
+  summarize(edu_RR_mean = mean(edu_RR, na.rm = TRUE),
+            edu_RR_sd = sd(edu_RR, na.rm = TRUE) ) %>%
+  as.data.frame()
+
+# create df of mean & sd of unemployment RR by class  
+unemploy_RR_df<- df_nps %>%
+  group_by(three_class_reordered) %>%
+  summarize(unemploy_RR_mean = mean(bw_unemploy_RR, na.rm = TRUE), 
+            unemploy_RR_sd = sd(bw_unemploy_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# combine datasets
+dataset <- left_join(edu_RR_df, unemploy_RR_df, by = "three_class_reordered")
+
+# create df of mean & sd of renters RR by class  
+renters_mean_df <- df_nps %>%
+  group_by(three_class_reordered) %>%
+  summarize(renter_RR_mean = mean(bw_renters_RR, na.rm = TRUE), 
+            renter_RR_sd = sd(bw_renters_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, renters_mean_df, by = "three_class_reordered")
+
+# create df of mean & sd of incarceration RR by class 
+incarc_mean_df <-  df_nps %>%
+  group_by(three_class_reordered) %>%
+  summarize(incarc_RR_mean = mean(incarceration_2015_2019_RR, na.rm = TRUE), 
+            incarc_RR_sd = sd(incarceration_2015_2019_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, incarc_mean_df, by = "three_class_reordered")
+
+# create df of mean & sd of income RR by class  
+med_income_df <- df_nps %>%
+  group_by(three_class_reordered) %>%
+  summarize(income_RR_mean = mean(wb_income_RR, na.rm = TRUE), 
+            income_RR_sd = sd(wb_income_RR, na.rm = TRUE)) %>%
+  as.data.frame()
+
+# add to dataset
+dataset <- left_join(dataset, med_income_df, by = "three_class_reordered")
+
+# convert factors to numeric
+dataset$three_class_reordered <- as.numeric(dataset$three_class_reordered)
+str(dataset)
+
+# get table into correct format
+dataset_t <- t(dataset) # transpose the table to get rownames as column headers
+dataset_t <- dataset_t %>% row_to_names(row_number = 1) # change 1st row to header row
+dataset_t <- round(dataset_t, 2) 
+
+# formatting
+plain_dataset <- rbind(
+cbind(
+paste0(dataset_t[1,1], " (", dataset_t[2,1], ")"),
+paste0(dataset_t[1,2], " (", dataset_t[2,2], ")"),
+paste0(dataset_t[1,3], " (", dataset_t[2,3], ")")),
+
+cbind(
+paste0(dataset_t[3,1], " (", dataset_t[4,1], ")"),
+paste0(dataset_t[3,2], " (", dataset_t[4,2], ")"),
+paste0(dataset_t[3,3], " (", dataset_t[4,3], ")")),
+
+cbind(
+paste0(dataset_t[5,1], " (", dataset_t[6,1], ")"),
+paste0(dataset_t[5,2], " (", dataset_t[6,2], ")"),
+paste0(dataset_t[5,3], " (", dataset_t[6,3], ")")),
+
+cbind(
+paste0(dataset_t[7,1], " (", dataset_t[8,1], ")"),
+paste0(dataset_t[7,2], " (", dataset_t[8,2], ")"),
+paste0(dataset_t[7,3], " (", dataset_t[8,3], ")")),
+
+cbind(
+paste0(dataset_t[9,1], " (", dataset_t[10,1], ")"),
+paste0(dataset_t[9,2], " (", dataset_t[10,2], ")"),
+paste0(dataset_t[9,3], " (", dataset_t[10,3], ")"))
+)
+
+rownames  <- c("Education inequity", 
+               "Employment inequity",
+               "Homeownership inequity", 
+               "Incarceration inequity", 
+               "Income inequity")
+
+plain_dataset <- cbind(rownames, plain_dataset)
+
+plain_dataset <- data.frame(plain_dataset)
+
+colnames(plain_dataset) <- c("Domain", "Type 1", "Type 2", "Type 3")
+
+plain_dataset
+
+write_csv(plain_dataset, "../../data/cleaned/typology_mean_sd_3_class_nps.csv")
+```
+
+
+# Calculate B & W rates for each typology in 3 typology model 
+
+```{r}
+# Subset by class
+class1<- df %>% filter(three_class_reordered == 1)
+class2<- df %>% filter(three_class_reordered == 2)
+class3<- df %>% filter(three_class_reordered == 3)
+```
+
+```{r}
+# Education
+class1_mean_edu_black <- mean(class1$percent_no_college_black)
+class1_mean_edu_white <- mean(class1$percent_no_college_white)
+
+class2_mean_edu_black <- mean(class2$percent_no_college_black)
+class2_mean_edu_white <- mean(class2$percent_no_college_white)
+
+class3_mean_edu_black <- mean(class3$percent_no_college_black)
+class3_mean_edu_white <- mean(class3$percent_no_college_white)
+
+# mean black & white rates by class    
+class1_mean_edu_black 
+class1_mean_edu_white
+
+class2_mean_edu_black 
+class2_mean_edu_white
+
+class3_mean_edu_black
+class3_mean_edu_white
+
+# mean b-w ratio by class
+class1_mean_edu_rr <- class1$edu_RR %>% mean(na.rm = TRUE)
+class1_mean_edu_sd <- class1$edu_RR %>% sd(na.rm = TRUE)
+class2_mean_edu_rr <- class2$edu_RR %>% mean(na.rm = TRUE)
+class2_mean_edu_sd <- class2$edu_RR %>% sd(na.rm = TRUE)
+class3_mean_edu_rr <- class3$edu_RR %>% mean(na.rm = TRUE)
+class3_mean_edu_sd <- class3$edu_RR %>% sd(na.rm = TRUE)
+
+class1_mean_edu_rr
+class1_mean_edu_sd
+
+class2_mean_edu_rr
+class2_mean_edu_sd
+
+class3_mean_edu_rr
+class3_mean_edu_sd
+```
+
+```{r}
+# Employment
+class1_mean_unemploy_black <- mean(class1$unemployment_black)
+class1_mean_unemploy_white <- mean(class1$unemployment_white_non_hispanic)
+
+class2_mean_unemploy_black <- mean(class2$unemployment_black)
+class2_mean_unemploy_white <- mean(class2$unemployment_white_non_hispanic)
+
+class3_mean_unemploy_black <- mean(class3$unemployment_black)
+class3_mean_unemploy_white <- mean(class3$unemployment_white_non_hispanic)
+
+# mean b & w rates
+class1_mean_unemploy_black
+class1_mean_unemploy_white
+
+class2_mean_unemploy_black
+class2_mean_unemploy_white
+
+class3_mean_unemploy_black
+class3_mean_unemploy_white
+
+# mean b-w ratio by class
+class1_mean_unemploy_rr <- class1$bw_unemploy_RR %>% mean(na.rm = TRUE)
+class1_mean_unemploy_sd <- class1$bw_unemploy_RR %>% sd(na.rm = TRUE)
+class2_mean_unemploy_rr <- class2$bw_unemploy_RR %>% mean(na.rm = TRUE)
+class2_mean_unemploy_sd <- class2$bw_unemploy_RR %>% sd(na.rm = TRUE)
+class3_mean_unemploy_rr <- class3$bw_unemploy_RR %>% mean(na.rm = TRUE)
+class3_mean_unemploy_sd <- class3$bw_unemploy_RR %>% sd(na.rm = TRUE)
+
+class1_mean_unemploy_rr
+class1_mean_unemploy_sd
+
+class2_mean_unemploy_rr
+class2_mean_unemploy_sd
+
+class3_mean_unemploy_rr
+class3_mean_unemploy_sd
+```
+
+```{r}
+# Homeownership
+class1_mean_renter_black <- mean(class1$black_renter_occupied_homes_percent)
+class1_mean_renter_white <- mean(class1$white_renter_occupied_homes_percent)
+
+class2_mean_renter_black <- mean(class2$black_renter_occupied_homes_percent)
+class2_mean_renter_white <- mean(class2$white_renter_occupied_homes_percent)
+
+class3_mean_renter_black <- mean(class3$black_renter_occupied_homes_percent)
+class3_mean_renter_white <- mean(class3$white_renter_occupied_homes_percent)
+
+# mean b & w rates
+class1_mean_renter_black
+class1_mean_renter_white
+
+class2_mean_renter_black
+class2_mean_renter_white
+
+class3_mean_renter_black
+class3_mean_renter_white
+
+# mean b-w ratio by class
+class1_mean_renter_rr <- class1$bw_renters_RR %>% mean(na.rm = TRUE)
+class1_mean_renter_sd <- class1$bw_renters_RR %>% sd(na.rm = TRUE)
+class2_mean_renter_rr <- class2$bw_renters_RR %>% mean(na.rm = TRUE)
+class2_mean_renter_sd <- class2$bw_renters_RR %>% sd(na.rm = TRUE)
+class3_mean_renter_rr <- class3$bw_renters_RR %>% mean(na.rm = TRUE)
+class3_mean_renter_sd <- class3$bw_renters_RR %>% sd(na.rm = TRUE)
+
+class1_mean_renter_rr
+class1_mean_renter_sd
+
+class2_mean_renter_rr
+class2_mean_renter_sd
+
+class3_mean_renter_rr
+class3_mean_renter_sd
+```
+
+```{r}
+# Incarceration
+class1_mean_incarc_black <- mean(class1$ave_incarceration_rate_per100k_black_nh, na.rm= TRUE)
+class1_mean_incarc_white <- mean(class1$ave_incarceration_rate_per100k_white_nh, na.rm= TRUE)
+
+class2_mean_incarc_black <- mean(class2$ave_incarceration_rate_per100k_black_nh, na.rm= TRUE)
+class2_mean_incarc_white <- mean(class2$ave_incarceration_rate_per100k_white_nh, na.rm= TRUE)
+
+class3_mean_incarc_black <- mean(class3$ave_incarceration_rate_per100k_black_nh, na.rm= TRUE)
+class3_mean_incarc_white <- mean(class3$ave_incarceration_rate_per100k_white_nh, na.rm= TRUE)
+
+# B and W rates
+class1_mean_incarc_black
+class1_mean_incarc_white
+
+class2_mean_incarc_black
+class2_mean_incarc_white
+
+class3_mean_incarc_black
+class3_mean_incarc_white
+
+# mean b-w ratio by class
+class1_mean_incarc_rr <- class1$bw_rr_incarc %>% mean(na.rm = TRUE)
+class1_mean_incarc_sd <- class1$bw_rr_incarc %>% sd(na.rm = TRUE)
+class2_mean_incarc_rr <- class2$bw_rr_incarc %>% mean(na.rm = TRUE)
+class2_mean_incarc_sd <- class2$bw_rr_incarc %>% sd(na.rm = TRUE)
+class3_mean_incarc_rr <- class3$bw_rr_incarc %>% mean(na.rm = TRUE)
+class3_mean_incarc_sd <- class3$bw_rr_incarc %>% sd(na.rm = TRUE)
+
+class1_mean_incarc_rr
+class1_mean_incarc_sd
+
+class2_mean_incarc_rr
+class2_mean_incarc_sd
+
+class3_mean_incarc_rr
+class3_mean_incarc_sd
+```
+
+```{r}
+# Income
+class1_mean_income_black <- mean(class1$median_income_black)
+class1_mean_income_white <- mean(class1$median_income_white)
+
+class2_mean_income_black <- mean(class2$median_income_black)
+class2_mean_income_white <- mean(class2$median_income_white)
+
+class3_mean_income_black <- mean(class3$median_income_black)
+class3_mean_income_white <- mean(class3$median_income_white)
+
+# B & W rates
+class1_mean_income_black
+class1_mean_income_white
+
+class2_mean_income_black
+class2_mean_income_white
+
+class3_mean_income_black
+class3_mean_income_white
+
+# mean b-w ratio by class
+class1_mean_income_rr <- class1$wb_income_RR %>% mean(na.rm = TRUE)
+class1_mean_income_sd <- class1$wb_income_RR  %>% sd(na.rm = TRUE)
+class2_mean_income_rr <- class2$wb_income_RR  %>% mean(na.rm = TRUE)
+class2_mean_income_sd <- class2$wb_income_RR  %>% sd(na.rm = TRUE)
+class3_mean_income_rr <- class3$wb_income_RR  %>% mean(na.rm = TRUE)
+class3_mean_income_sd <- class3$wb_income_RR  %>% sd(na.rm = TRUE)
+
+class1_mean_income_rr
+class1_mean_income_sd
+
+class2_mean_income_rr
+class2_mean_income_sd
+
+class3_mean_income_rr
+class3_mean_income_sd
+```
+

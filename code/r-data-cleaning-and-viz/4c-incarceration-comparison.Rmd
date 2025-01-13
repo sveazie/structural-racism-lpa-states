@@ -1,0 +1,246 @@
+---
+title: "4c. Comparing incarceration variables"
+author: "Stephanie Veazie"
+date: "2024-08-27"
+output: html_document
+---
+
+# Comparing original vs. alternative incarceration estimates 
+
+```{r}
+# Pull in NPS ie alternative data (corrected denominator)
+incarceration_alt <- read_csv("../../data/cleaned/incarceration-nps-clean.csv")
+
+# Make a smaller dataset of just 2015-2019 data
+incarceration_alt %<>%
+  select(  
+    State.Code,
+    NAME, 
+  white_incarceration_rate_2015, 
+  white_incarceration_rate_2016, 
+  white_incarceration_rate_2017, 
+  white_incarceration_rate_2018, 
+  white_incarceration_rate_2019, 
+  
+  black_incarceration_rate_2015, 
+  black_incarceration_rate_2016, 
+  black_incarceration_rate_2017, 
+  black_incarceration_rate_2018, 
+  black_incarceration_rate_2019,
+  
+  white_incarceration_rate_2015_2019, 
+  black_incarceration_rate_2015_2019, 
+  incarceration_2015_2019_RR
+  )
+
+# Add col with version
+incarceration_alt2 <- incarceration_alt %>% mutate(version = "alternative")
+
+# Rename variables
+incarceration_alt3 <- incarceration_alt2 %>% rename(
+  abbr = State.Code, 
+  state = NAME, 
+  bw_incarc_rr_2019 = incarceration_2015_2019_RR
+)
+
+# Rearrange
+incarceration_alt3 <- incarceration_alt3[,c(1:2, 16, 3:15)]
+```
+
+```{r}
+# Pull in NCRP ie original data (corrected denominator)
+incarceration_original <- read_csv("../../data/cleaned/incarceration-ncrp-clean-for-viz.csv")
+
+# Select variables of interest
+incarceration_original2 <- incarceration_original %>% select(
+  incarceration_rate_state_vector, 
+  
+  incarceration_rate_2015_black_nh, 
+  incarceration_rate_2016_black_nh, 
+  incarceration_rate_2017_black_nh, 
+  incarceration_rate_2018_black_nh, 
+  incarceration_rate_2019_black_nh, 
+  
+  incarceration_rate_2015_white_nh, 
+  incarceration_rate_2016_white_nh, 
+  incarceration_rate_2017_white_nh, 
+  incarceration_rate_2018_white_nh, 
+  incarceration_rate_2019_white_nh, 
+  
+  black_incarceration_rate_2015_2019, 
+  white_incarceration_rate_2015_2019, 
+  bw_incarc_rr_2019)
+
+# Add col with version
+incarceration_original3 <- incarceration_original2 %>% mutate(version = "original")
+
+# Rename variables
+incarceration_original4 <- incarceration_original3 %>% rename(
+  state = incarceration_rate_state_vector, 
+  black_incarceration_rate_2015 = incarceration_rate_2015_black_nh, 
+  black_incarceration_rate_2016 = incarceration_rate_2016_black_nh, 
+  black_incarceration_rate_2017 = incarceration_rate_2017_black_nh, 
+  black_incarceration_rate_2018 = incarceration_rate_2018_black_nh, 
+  black_incarceration_rate_2019 = incarceration_rate_2019_black_nh, 
+  
+  white_incarceration_rate_2015 = incarceration_rate_2015_white_nh, 
+  white_incarceration_rate_2016 = incarceration_rate_2016_white_nh, 
+  white_incarceration_rate_2017 = incarceration_rate_2017_white_nh, 
+  white_incarceration_rate_2018 = incarceration_rate_2018_white_nh, 
+  white_incarceration_rate_2019 = incarceration_rate_2019_white_nh, 
+)
+
+incarceration_original4 <- incarceration_original4[,c(1,15,2:14)]
+
+
+# Combine old & new datasets (wide)
+incarceration_comb <- merge(incarceration_original4, incarceration_alt3, 
+                            by.x = "state", by.y = "state")
+
+```
+
+```{r}
+# Create subset of just RR
+incarceration_comb_RR <- incarceration_comb %>% select(
+   state,
+   bw_incarc_rr_2019.x, 
+   bw_incarc_rr_2019.y)
+
+# Rename columns
+colnames(incarceration_comb_RR) <- c("state", "RR_original", "RR_alternative")
+
+# Pivot long for data viz purposes
+RR_long <- incarceration_comb_RR %>% 
+  pivot_longer(cols = starts_with("RR_"),
+               names_to = "version", 
+               values_to = "Estimate")
+
+```
+
+```{r}
+# Plot to compare old vs. new estimates of RR for 2015-2019
+compare_2015_2019 <- 
+  ggplot(RR_long, aes(x = version, y = Estimate, fill = version)) +
+  geom_bar(stat = "identity") + 
+  geom_text(aes(label = round(Estimate, 3)),  # Add labels with rounded values
+            hjust = -.5,  # Vertical adjustment to position the text above the points
+            size = 3) +  # Adjust the size of the text
+  facet_wrap(~ state, ncol = 5, scales = "free_y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "2015-2019 Black-White Incarceration RR by State, Old vs. New Estimates",
+       x = "State",
+       y = "2015-2019 B-W Incarceration RR Estimate")
+
+compare_2015_2019
+
+ggsave("../../data/viz/compare-incarceration-rr-by-data-source.png", height = 30, width = 15)
+```
+
+```{r}
+# Create subset of just white & black incarceration rates by year, old data
+incarceration_original5 <- incarceration_original4 %>% select(
+  state, 
+  white_incarceration_rate_2015, 
+  white_incarceration_rate_2016, 
+  white_incarceration_rate_2017, 
+  white_incarceration_rate_2018, 
+  white_incarceration_rate_2019, 
+  
+  black_incarceration_rate_2015, 
+  black_incarceration_rate_2016, 
+  black_incarceration_rate_2017, 
+  black_incarceration_rate_2018, 
+  black_incarceration_rate_2019,
+)
+
+# Label as old data
+incarceration_original6 <- incarceration_original5 %>% 
+  rename_with(~ paste0("orig_", .))
+
+# Create subset of just white & black incarceration rates by year, new data
+incarceration_alt4<- incarceration_alt3 %>% select(
+  state, 
+  white_incarceration_rate_2015, 
+  white_incarceration_rate_2016, 
+  white_incarceration_rate_2017, 
+  white_incarceration_rate_2018, 
+  white_incarceration_rate_2019, 
+  
+  black_incarceration_rate_2015, 
+  black_incarceration_rate_2016, 
+  black_incarceration_rate_2017, 
+  black_incarceration_rate_2018, 
+  black_incarceration_rate_2019,
+)
+  
+# label as new data
+incarceration_alt5 <- incarceration_alt4 %>% 
+  rename_with(~ paste0("alt_", .))
+
+# Merge datasets
+incarceration_rate_year_comb <- merge(incarceration_original6, 
+                                      incarceration_alt5, 
+                                      by.x = "orig_state", 
+                                      by.y = "alt_state")
+```
+
+```{r}
+# Pivot long for data viz purposes
+rate_long <- incarceration_rate_year_comb %>% 
+  pivot_longer(cols = contains("incarceration_rate"), 
+               names_to = "variable", 
+               values_to = "Estimate")
+
+# Create white dataset
+rate_long_white <- rate_long %>% filter(str_detect(variable,"white_incarceration_rate"))
+
+# create columns for year & version
+rate_long_white_2 <- rate_long_white %>% mutate(
+  year = str_extract(variable, "\\d+$"), 
+  version = sub("_.*", "", variable))
+
+# Create black dataset
+rate_long_black <- rate_long %>% filter(str_detect(variable,"black_incarceration_rate"))
+
+# create columns for year & version
+rate_long_black_2 <- rate_long_black %>% mutate(
+  year = str_extract(variable, "\\d+$"), 
+  version = sub("_.*", "", variable))
+```
+
+```{r}
+# Plot to check work, old vs. new white rates
+incarceration_rate_white <- 
+  ggplot(rate_long_white_2, aes(x = year, y = Estimate, color = version, group = version)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ orig_state, ncol = 5, scales = "free_y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "White incarceration rates per 100,000 residents, Original (NRCP) vs Alternative (NPS) Datasets",
+       x = "Year",
+       y = "White incarceration rate")
+
+incarceration_rate_white
+
+ggsave("../../data/viz/compare-incarceration-white-rates-by-data-source.png", height = 15, width = 15)
+```
+
+```{r}
+# Plot to check work, old vs. new black rates
+incarceration_rate_black <- 
+  ggplot(rate_long_black_2, aes(x = year, y = Estimate, color = version, group = version)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ orig_state, ncol = 5, scales = "free_y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Black incarceration rates per 100,000 residents, Original (NRCP) vs Alternative (NPS) Datasets",
+       x = "Year",
+       y = "Black incarceration rate")
+
+incarceration_rate_black
+
+ggsave("../../data/viz/compare-incarceration-black-rates-by-data-source.png", height = 15, width = 15)
+```

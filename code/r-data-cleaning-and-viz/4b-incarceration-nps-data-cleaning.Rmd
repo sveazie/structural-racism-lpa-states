@@ -1,0 +1,258 @@
+---
+title: "4b. Alternative incarceration data cleaning"
+author: "Stephanie Veazie"
+date: "2024-08-08"
+output: html_document
+---
+
+```{r, load libraries}
+library(tidyverse)
+library(magrittr)
+```
+
+Load data from National Prisoner Survey (NPS)
+
+https://www.icpsr.umich.edu/web/NACJD/studies/38871
+
+1.	Available from University of Michigan Institute for Social Research 
+2.	Requires signing up for an account
+3.	Click on “Download” then “R” 
+4.	Agree to terms of use
+5.	Download as a Zip file
+
+To get the codebook, starting from the link above, click on "Explore data" then "Download codebook."
+
+```{r, NPS data}
+# load & save data
+load("../../data/raw/nps/ICPSR_38871/DS0001/38871-0001-Data.rda")
+
+nps <- da38871.0001
+
+# select applicable variables
+nps_2 <- nps %>% select(
+  YEAR, 
+  STATEID, 
+  STATE, 
+  BLACKM, # non-hispanic
+  BLACKF, # non-hispanic
+  WHITEM, # non-hispanic
+  WHITEF  # non-hispanic
+)
+
+# Filter to 2010-2019
+nps_3 <- nps_2 %>% filter(YEAR %in% c(2015, 2016, 2017, 2018, 2019))
+
+# Combine female & male columns
+nps_4 <- nps_3 %>% mutate(
+  incarcerated_black_nh = BLACKM + BLACKF, 
+  incarcerated_white_nh = WHITEM + WHITEF
+)
+
+# Select only the variables of interest
+nps_5 <- nps_4 %>% select(
+  YEAR, 
+  STATE, 
+  incarcerated_white_nh, 
+  incarcerated_black_nh
+)
+
+# Pivot wider so each state's data is on 1 row.
+nps_wide <- nps_5 %>% pivot_wider(names_from= "YEAR",  
+                                  values_from = c(incarcerated_white_nh, 
+                                                  incarcerated_black_nh),
+                                  names_glue="{.value}_{YEAR}")
+```
+
+# Import data from US Census Bureau website
+
+1. Go to the US Census Bureau's Population & Housing Unit Estimates website-
+https://www.census.gov/programs-surveys/popest/technical-documentation/research/evaluation-estimates/2020-evaluation-estimates/2010s-state-detail.html
+
+2. Download the Excel sheet titled "Annual State Resident Population Estimates for 6 Race Groups (5 Race Alone Groups and Two or More Races) by Age, Sex, and Hispanic Origin: April 1, 2010 to July 1, 2019; April 1, 2020; and July 1, 2020 (SC-EST2020-ALLDATA6) [<1.0 MB]" 
+
+3. Download the accompanying "File Layout" PDF 
+
+```{r}
+# Import CSV
+residents<- read_csv("../../data/raw/us-census/SC-EST2020-ALLDATA6.csv")
+```
+
+```{r}
+# Select variables of interest, 2010-2019
+selected_residents<- select(residents, c("STATE", "NAME", "SEX", "ORIGIN", "RACE", "AGE", 
+                                         "POPESTIMATE2015", 
+                                         "POPESTIMATE2016",
+                                         "POPESTIMATE2017", 
+                                         "POPESTIMATE2018",
+                                         "POPESTIMATE2019"))
+
+# Filter to non-hispanic individuals
+selected_residents_2<- filter(selected_residents, ORIGIN == 1)
+```
+
+```{r}
+# Filter to all sexes
+selected_residents_2 %<>% filter(SEX == 0)
+```
+
+```{r}
+# Filter to Black or White individuals
+selected_residents_3 <- filter(selected_residents_2, RACE == 1 | RACE == 2) 
+```
+
+```{r}
+# Filter to those aged 15-64
+selected_residents_4 <- selected_residents_3 %>% filter(AGE %in% (15:64))
+```
+
+```{r}
+# Group by state & race
+by_state_race<- group_by(selected_residents_4, NAME, RACE)
+
+# Sum residential info by group
+resident_summary<- as.data.frame(
+  summarize(by_state_race, 
+            residents_2015 = sum(POPESTIMATE2015), 
+            residents_2016 = sum(POPESTIMATE2016), 
+            residents_2017 = sum(POPESTIMATE2017), 
+            residents_2018 = sum(POPESTIMATE2018), 
+            residents_2019 = sum(POPESTIMATE2019))
+)
+
+# Label race data
+resident_summary<- resident_summary %>%
+  mutate(
+    race = case_when(
+      RACE == 1 ~ "white_nh", 
+      RACE == 2 ~ "black_nh"))
+
+# Remove duplicative race row
+resident_summary <- resident_summary[,-2]
+```
+
+```{r}
+# Pivot wider so each state's data is on 1 row.
+resident_summary_wide <- resident_summary %>% pivot_wider(names_from= race, values_from = c(
+  "residents_2015", "residents_2016", "residents_2017", "residents_2018", "residents_2019"
+  ), names_glue="{.value}_{race}")
+```
+
+### Import US Census region & division data
+
+Download file on US Census Regions & Divisions from https://github.com/cphalpert/census-regions/blob/master/us%20census%20bureau%20regions%20and%20divisions.csv
+
+```{r}
+# Import data on US Census Bureau region & division
+us_census<- read.csv("../../data/raw/us-census/us_census_bureau_regions_and_divisions.csv")
+
+# Remove DC
+# us_census<- us_census %>% filter(State !="District of Columbia")
+
+# Merge with existing dataset
+tidy_residents <- merge(resident_summary_wide, us_census, by.x = "NAME", by.y = "State")
+```
+
+Merge incarceration & residents datasets
+
+```{r}
+# merge datasets
+incarceration <- merge(tidy_residents, nps_wide, by.x = "State.Code", by.y = "STATE")
+
+# Create new variables
+incarceration_2 <- incarceration %>% mutate(
+  
+          # white
+          
+          white_incarceration_rate_2015 = incarcerated_white_nh_2015 * 100000/
+            residents_2015_white_nh, 
+          
+          white_incarceration_rate_2016 = incarcerated_white_nh_2016 * 100000/
+            residents_2016_white_nh, 
+          
+          white_incarceration_rate_2017 = incarcerated_white_nh_2017 * 100000/
+            residents_2017_white_nh, 
+          
+          white_incarceration_rate_2018 = incarcerated_white_nh_2018 * 100000/
+            residents_2018_white_nh, 
+          
+          white_incarceration_rate_2019 = incarcerated_white_nh_2019 * 100000/
+            residents_2019_white_nh, 
+          
+          # black
+
+          black_incarceration_rate_2015 = incarcerated_black_nh_2015 * 100000/
+            residents_2015_black_nh, 
+          
+          black_incarceration_rate_2016 = incarcerated_black_nh_2016 * 100000/
+            residents_2016_black_nh, 
+          
+          black_incarceration_rate_2017 = incarcerated_black_nh_2017 * 100000/
+            residents_2017_black_nh, 
+          
+          black_incarceration_rate_2018 = incarcerated_black_nh_2018 * 100000/
+            residents_2018_black_nh, 
+          
+          black_incarceration_rate_2019 = incarcerated_black_nh_2019 * 100000/
+            residents_2019_black_nh
+)
+```
+
+```{r}
+# Calculate 5-year average incarceration rates for each race
+incarceration_3 <- incarceration_2 %>% 
+  mutate(
+         white_incarceration_rate_2015_2019 = 
+           rowMeans(incarceration_2[,25:29], na.rm = TRUE), 
+         
+         black_incarceration_rate_2015_2019 = 
+           rowMeans(incarceration_2[,30:34], na.rm = TRUE)
+  )
+```
+
+```{r}
+# Calculate RR for 2015-2019
+incarceration_4 <- incarceration_3 %>% mutate(
+  
+  incarceration_2015_2019_RR = black_incarceration_rate_2015_2019 /
+    white_incarceration_rate_2015_2019)
+```
+
+```{r}
+# Create dataset for export
+incarceration_4_select <- incarceration_4 %>% select(NAME, incarceration_2015_2019_RR)
+colnames(incarceration_4_select) <- c("state", "incarceration-RR_2015-2019")
+
+incarceration_for_export <- incarceration_4_select %>% pivot_longer(
+  cols = contains("incarceration-RR"), 
+  names_to = c("variable", "year"), 
+  names_sep = "_", 
+  values_to = "incarceration_RR"
+)
+
+incarceration_for_export %<>% mutate(year_renamed =
+                                        case_when(
+                                          grepl("2015-2019", year) ~ 2019) 
+)
+
+incarceration_for_export <- incarceration_for_export %>% select(state, year_renamed, incarceration_RR)
+
+colnames(incarceration_for_export) <- c("state", "year", "incarceration_RR")
+
+write_csv(incarceration_for_export, "../../data/cleaned/incarceration-nps-clean-for-viz.csv")
+
+write_csv(incarceration_4, "../../data/cleaned/incarceration-nps-clean.csv")
+```
+
+```{r}
+incarceration_look <- incarceration_4 %>% 
+  pivot_longer(
+  cols = starts_with("incarcerated"), 
+  names_to = c("variable", "race", "ethnicity", "year"), 
+  names_sep = "_", 
+  values_to = "data")
+
+incarceration_look2 <- incarceration_look %>% select(NAME, variable, race, year, data)
+
+na.results <- incarceration_look2 %>% filter(is.na(data))
+
+```
